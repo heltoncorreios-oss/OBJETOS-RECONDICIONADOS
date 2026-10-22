@@ -1,0 +1,6 @@
+{
+  "name": "Controle de Objetos Recondicionados - CDD São Manuel",
+  "description": "Sistema de gestão e emissão de Controle de Objetos Recondicionados e Termos de Constatação do CDD São Manuel - Correios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

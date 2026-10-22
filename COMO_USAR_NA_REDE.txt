@@ -1,0 +1,58 @@
+================================================================================
+          CORREIOS - SISTEMA DE CONTROLE DE OBJETOS RECONDICIONADOS
+                  MANUAL DE USO EM REDE LOCAL (MULTI-COMPUTADOR)
+================================================================================
+
+Este sistema foi projetado para operar com BANCO DE DADOS LOCAL CENTRALIZADO
+compartilhado entre múltiplos computadores do CDD / Agência através da rede local.
+
+--------------------------------------------------------------------------------
+1. COMO INICIAR NO COMPUTADOR PRINCIPAL (SERVIDOR DA UNIDADE)
+--------------------------------------------------------------------------------
+1. Escolha um computador que fique ligado durante o expediente (ex: supervisão ou triagem).
+2. Dê dois cliques no arquivo:
+      INICIAR_SISTEMA.bat
+
+3. O que o arquivo faz automaticamente:
+   - Identifica o Node.js embutido na pasta "node-portable" (ou no Windows).
+   - Inicia o servidor local na porta 3000 com o banco de dados em "data/banco_dados.json".
+   - Abre o navegador automaticamente no endereço: http://localhost:3000
+   - Exibe na tela preta os IPs para os outros computadores acessarem.
+
+IMPORTANTE: Deixe a janela preta do "INICIAR_SISTEMA.bat" aberta enquanto o sistema
+estiver sendo utilizado na unidade. Para fechar o sistema, basta fechar a janela.
+
+--------------------------------------------------------------------------------
+2. COMO ACESSAR DOS OUTROS COMPUTADORES DA UNIDADE
+--------------------------------------------------------------------------------
+1. Os outros computadores NÃO precisam instalar nada!
+2. Abra o Google Chrome, Microsoft Edge ou Firefox.
+3. Digite o endereço IP mostrado na tela da máquina principal, por exemplo:
+      http://192.168.0.15:3000
+   (substitua pelo IP real exibido no INICIAR_SISTEMA.bat)
+4. Pronto! Todos os lançamentos, exclusões e impressões são salvos no mesmo banco
+   e sincronizados em tempo real entre todos os computadores.
+
+--------------------------------------------------------------------------------
+3. SOBRE O NODE.JS PORTÁTIL EMBUTIDO (SEM PRECISAR DE INSTALADOR/ADMIN)
+--------------------------------------------------------------------------------
+- Caso o computador não tenha o Node.js instalado e a sua conta de usuário não
+  tenha permissão de Administrador do Windows:
+  Basta dar dois cliques no arquivo:
+      BAIXAR_NODE_PORTATIL.bat
+  Ele baixa os arquivos oficiais do Node.js e descompacta na pasta "node-portable",
+  sem alterar o registro do Windows e sem precisar de senha de administrador!
+
+--------------------------------------------------------------------------------
+4. ONDE FICA O BANCO DE DADOS E COMO FAZER BACKUP
+--------------------------------------------------------------------------------
+- O banco de dados fica na pasta:
+      data/banco_dados.json
+- Para fazer um backup rápido em um clique:
+      Dê dois cliques em BACKUP_BANCO_DADOS.bat
+  Ele cria uma cópia com data e hora na pasta "backups".
+  Você também pode copiar a pasta "data" para um pendrive a qualquer momento.
+
+================================================================================
+Dúvidas ou Suporte: Sistema em conformidade com as normas operacionais dos Correios.
+================================================================================

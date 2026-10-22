@@ -1,0 +1,197 @@
+[
+  {
+    "id": "rec-001",
+    "dataConstatacao": "2026-10-14",
+    "diaDoMes": 14,
+    "mesReferencia": 10,
+    "anoReferencia": 2026,
+    "itemNumero": 1,
+    "termoNumero": "97",
+    "anoCorrente": 2026,
+    "codigoRastreamento": "QN971743142BR",
+    "unidadeConstatacao": "CDD SÃO MANUEL",
+    "dr": "SPI",
+    "codigoSto": "18650-972",
+    "pesoPostalGramas": 14730,
+    "pesoRealGramas": 13260,
+    "valorDeclaradoTexto": "NC",
+    "unidadePostagem": "AGF ALONSO LOPEZ - CAJAMAR / SP",
+    "unidadeDestinoCodigo": "18654066",
+    "remetenteNome": "ALONSO LOPEZ DISTRIBUIDORA E LOGÍSTICA",
+    "remetenteEndereco": "AV. DAS NAÇÕES, 1500 - DISTRITO INDUSTRIAL, CAJAMAR/SP",
+    "destinatarioNome": "COMERCIAL AGRICOLA SÃO MANUEL LTDA",
+    "destinatarioEndereco": "RODOVIA MARECHAL RONDON KM 274, SÃO MANUEL/SP",
+    "anomalias": {
+      "embalagemMolhadaParcialmente": false,
+      "conteudoBalancando": true,
+      "conteudoExtravasandoLiquido": false,
+      "embalagemDilaceradaMostraConteudo": true,
+      "embalagemIntactaSemCondicoes": false,
+      "conteudoAvariado": false,
+      "embalagemDilaceradaTotalmenteAvariado": false,
+      "embalagemIntactaMolhadaSemCondicoes": false,
+      "outrasOcorrencias": false,
+      "outrasOcorrenciasTexto": ""
+    },
+    "motivoResumo": "EMBALAGEM ABERTA",
+    "aiTcCie": "SEQUENCIA DO SISTEMA",
+    "providencias": {
+      "tipo": "recondicionado_encaminhado",
+      "recondicionadoDescricao": "Recondicionado com fita gomada ECT"
+    },
+    "operadorMatricula": "81149042",
+    "operadorNome": "Helton Correios",
+    "chefeNome": "HELTON JULIO SANTOS MANUEL",
+    "chefeMatricula": "8.114.904-2",
+    "declaracao": {
+      "tipoCliente": "destinatario",
+      "tipo": "aceite_sem_contestacao",
+      "nomeCliente": "COMERCIAL AGRICOLA SÃO MANUEL LTDA",
+      "dataDeclaracao": "2026-10-15"
+    },
+    "status": "termo_emitido",
+    "versaoDocumento": 1,
+    "criadoEm": "2026-10-14T08:00:00Z",
+    "atualizadoEm": "2026-10-14T08:00:00Z",
+    "historicoEmissoes": [
+      {
+        "id": "hist-001",
+        "tipoDocumento": "termo_individual",
+        "dataEmissao": "2026-10-14T08:15:00Z",
+        "versao": 1,
+        "usuarioOperador": "81149042",
+        "nomeArquivoGerado": "Termo_Constatacao_97_QN971743142BR.pdf"
+      }
+    ]
+  },
+  {
+    "id": "rec-002",
+    "dataConstatacao": "2026-10-21",
+    "diaDoMes": 21,
+    "mesReferencia": 10,
+    "anoReferencia": 2026,
+    "itemNumero": 1,
+    "termoNumero": "98",
+    "anoCorrente": 2026,
+    "codigoRastreamento": "AE047282865BR",
+    "unidadeConstatacao": "CDD SÃO MANUEL",
+    "dr": "SPI",
+    "codigoSto": "18650-972",
+    "pesoPostalGramas": 980,
+    "pesoRealGramas": 980,
+    "valorDeclaradoTexto": "NC",
+    "unidadePostagem": "AGF RIO BRANCO - BAURU / SP",
+    "unidadeDestinoCodigo": "18654570",
+    "remetenteNome": "FARMÁCIA CENTRAL DE MANIPULAÇÃO BAURU",
+    "remetenteEndereco": "RUA RIO BRANCO, 450 - CENTRO, BAURU/SP",
+    "destinatarioNome": "CARLOS EDUARDO DE SOUZA",
+    "destinatarioEndereco": "RUA SETE DE SETEMBRO, 112 - VILA KENNEDY, SÃO MANUEL/SP",
+    "anomalias": {
+      "embalagemMolhadaParcialmente": true,
+      "conteudoBalancando": false,
+      "conteudoExtravasandoLiquido": false,
+      "embalagemDilaceradaMostraConteudo": false,
+      "embalagemIntactaSemCondicoes": false,
+      "conteudoAvariado": false,
+      "embalagemDilaceradaTotalmenteAvariado": false,
+      "embalagemIntactaMolhadaSemCondicoes": true,
+      "outrasOcorrencias": false,
+      "outrasOcorrenciasTexto": ""
+    },
+    "motivoResumo": "MOLHADA",
+    "aiTcCie": "SEQUENCIA DO SISTEMA",
+    "providencias": {
+      "tipo": "recondicionado_encaminhado",
+      "recondicionadoDescricao": "Secagem externa e fita adesiva ECT"
+    },
+    "operadorMatricula": "81149042",
+    "operadorNome": "Helton Correios",
+    "chefeNome": "HELTON JULIO SANTOS MANUEL",
+    "chefeMatricula": "8.114.904-2",
+    "declaracao": {
+      "tipoCliente": "destinatario",
+      "tipo": "aceite_sem_contestacao",
+      "nomeCliente": "CARLOS EDUARDO DE SOUZA",
+      "dataDeclaracao": "2026-10-21"
+    },
+    "status": "termo_emitido",
+    "versaoDocumento": 1,
+    "criadoEm": "2026-10-21T07:30:00Z",
+    "atualizadoEm": "2026-10-21T07:30:00Z",
+    "historicoEmissoes": [
+      {
+        "id": "hist-002",
+        "tipoDocumento": "termo_individual",
+        "dataEmissao": "2026-10-21T07:45:00Z",
+        "versao": 1,
+        "usuarioOperador": "81149042",
+        "nomeArquivoGerado": "Termo_Constatacao_98_AE047282865BR.pdf"
+      }
+    ]
+  },
+  {
+    "id": "rec-003",
+    "dataConstatacao": "2026-10-21",
+    "diaDoMes": 21,
+    "mesReferencia": 10,
+    "anoReferencia": 2026,
+    "itemNumero": 2,
+    "termoNumero": "99",
+    "anoCorrente": 2026,
+    "codigoRastreamento": "Ae047884658br",
+    "unidadeConstatacao": "CDD SÃO MANUEL",
+    "dr": "SPI",
+    "codigoSto": "18650-972",
+    "pesoPostalGramas": 760,
+    "pesoRealGramas": 760,
+    "valorDeclaradoTexto": "NC",
+    "unidadePostagem": "AC PIRAPOZINHO - PIRAPOZINHO / SP",
+    "unidadeDestinoCodigo": "18650065",
+    "remetenteNome": "SUMETAL IND E COM DE BOT E FIVELAS DE METAL LTDA",
+    "remetenteEndereco": "RUA GOTARDO PELIN, 206",
+    "destinatarioNome": "BOA NOVA COMERCIAL AGROPECUÁRIA E PARTICIPAÇÕES",
+    "destinatarioEndereco": "RUA XV DE NOVEMBRO 792",
+    "anomalias": {
+      "embalagemMolhadaParcialmente": true,
+      "conteudoBalancando": false,
+      "conteudoExtravasandoLiquido": false,
+      "embalagemDilaceradaMostraConteudo": false,
+      "embalagemIntactaSemCondicoes": false,
+      "conteudoAvariado": false,
+      "embalagemDilaceradaTotalmenteAvariado": false,
+      "embalagemIntactaMolhadaSemCondicoes": false,
+      "outrasOcorrencias": true,
+      "outrasOcorrenciasTexto": "ENCAMINHADA PARA AC SÃO MANUEL"
+    },
+    "motivoResumo": "MOLHADA",
+    "aiTcCie": "SEQUENCIA DO SISTEMA",
+    "providencias": {
+      "tipo": "outras",
+      "outrasDescricao": "ENCAMINHADA PARA AC SÃO MANUEL"
+    },
+    "operadorMatricula": "81149042",
+    "operadorNome": "Helton Correios",
+    "chefeNome": "HELTON JULIO SANTOS MANUEL",
+    "chefeMatricula": "8.114.904-2",
+    "declaracao": {
+      "tipoCliente": "destinatario",
+      "tipo": "aceite_sem_contestacao",
+      "nomeCliente": "BOA NOVA COMERCIAL AGROPECUÁRIA E PARTICIPAÇÕES",
+      "dataDeclaracao": "2026-10-21"
+    },
+    "status": "termo_emitido",
+    "versaoDocumento": 1,
+    "criadoEm": "2026-10-21T07:50:00Z",
+    "atualizadoEm": "2026-10-21T07:50:00Z",
+    "historicoEmissoes": [
+      {
+        "id": "hist-003",
+        "tipoDocumento": "termo_individual",
+        "dataEmissao": "2026-10-21T08:00:00Z",
+        "versao": 1,
+        "usuarioOperador": "81149042",
+        "nomeArquivoGerado": "Termo_Constatacao_99_Ae047884658br.pdf"
+      }
+    ]
+  }
+]
