@@ -220,17 +220,35 @@ export function saveSettings(settings: UnitSettings): void {
 }
 
 export function getAllRecords(): ObjetoRecord[] {
+  let allRecords: ObjetoRecord[] = [];
   try {
     const raw = safeStorage.getItem(STORAGE_KEY_RECORDS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        allRecords = parsed;
       }
     }
   } catch (err) {}
-  saveAllRecords(INITIAL_SAMPLE_RECORDS);
-  return INITIAL_SAMPLE_RECORDS;
+
+  if (allRecords.length === 0) {
+    allRecords = INITIAL_SAMPLE_RECORDS;
+    saveAllRecords(allRecords);
+  }
+
+  // Filtrar estritamente pelos registros da unidade atual (configurada nas Configurações)
+  const currentSettings = getSettings();
+  const unitName = (currentSettings.nomeUnidade || '').trim().toUpperCase();
+  
+  if (!unitName) return allRecords;
+
+  const filtered = allRecords.filter(r => {
+    const recUnit = (r.unidadeConstatacao || '').trim().toUpperCase();
+    // Se o registro não tiver unidade definida ou pertencer à unidade atual, exibe
+    return !recUnit || recUnit === unitName;
+  });
+
+  return filtered.length > 0 ? filtered : allRecords;
 }
 
 export function saveAllRecords(records: ObjetoRecord[]): void {
