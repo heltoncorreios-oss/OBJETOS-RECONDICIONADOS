@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "ObjetoRecord": {
+      "title": "ObjetoRecord",
+      "description": "Registro de objeto recondicionado e termo de constatação",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dataConstatacao": { "type": "string" },
+        "diaDoMes": { "type": "number" },
+        "mesReferencia": { "type": "number" },
+        "anoReferencia": { "type": "number" },
+        "itemNumero": { "type": "number" },
+        "termoNumero": { "type": "string" },
+        "anoCorrente": { "type": "number" },
+        "codigoRastreamento": { "type": "string" },
+        "unidadeConstatacao": { "type": "string" },
+        "dr": { "type": "string" },
+        "codigoSto": { "type": "string" },
+        "pesoPostalGramas": { "type": "number" },
+        "pesoRealGramas": { "type": "number" },
+        "valorDeclaradoTexto": { "type": "string" },
+        "unidadePostagem": { "type": "string" },
+        "unidadeDestinoCodigo": { "type": "string" },
+        "remetenteNome": { "type": "string" },
+        "remetenteEndereco": { "type": "string" },
+        "destinatarioNome": { "type": "string" },
+        "destinatarioEndereco": { "type": "string" },
+        "motivoResumo": { "type": "string" },
+        "aiTcCie": { "type": "string" },
+        "operadorMatricula": { "type": "string" },
+        "operadorNome": { "type": "string" },
+        "chefeNome": { "type": "string" },
+        "chefeMatricula": { "type": "string" },
+        "status": { "type": "string" },
+        "versaoDocumento": { "type": "number" },
+        "criadoEm": { "type": "string" },
+        "atualizadoEm": { "type": "string" }
+      },
+      "required": ["id", "codigoRastreamento", "termoNumero"]
+    },
+    "UnitSettings": {
+      "title": "UnitSettings",
+      "description": "Configurações institucionais da unidade",
+      "type": "object",
+      "properties": {
+        "nomeUnidade": { "type": "string" },
+        "dr": { "type": "string" },
+        "codigoSto": { "type": "string" },
+        "cidade": { "type": "string" },
+        "uf": { "type": "string" },
+        "chefeNome": { "type": "string" },
+        "chefeMatricula": { "type": "string" },
+        "operadorMatriculaPadrao": { "type": "string" },
+        "operadorPadraoNome": { "type": "string" },
+        "destinoPadrao": { "type": "string" },
+        "reiniciarNumeracao": { "type": "string" },
+        "formatoNumeroTermo": { "type": "string" },
+        "numeroSequenciaInicial": { "type": "number" },
+        "sequencialGeral": { "type": "number" },
+        "corTextoDigitado": { "type": "string" }
+      },
+      "required": ["nomeUnidade"]
+    }
+  },
+  "firestore": {
+    "/objetos_recondicionados/{recordId}": {
+      "schema": "ObjetoRecord",
+      "description": "Coleção central de objetos recondicionados e termos"
+    },
+    "/configuracoes/unidade": {
+      "schema": "UnitSettings",
+      "description": "Configurações globais da unidade"
+    }
+  }
+}

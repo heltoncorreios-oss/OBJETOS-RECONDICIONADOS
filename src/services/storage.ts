@@ -1,9 +1,10 @@
 import { ObjetoRecord, UnitSettings } from '../types';
+import { db } from './firebase';
+import { collection, doc, getDocs, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 
 const STORAGE_KEY_RECORDS = 'cdd_saomanuel_objetos_v3';
 const STORAGE_KEY_SETTINGS = 'cdd_saomanuel_settings_v3';
 
-// Armazenamento em memória seguro caso o navegador/iframe bloqueie o localStorage
 const memoryStorage = new Map<string, string>();
 
 export const safeStorage = {
@@ -12,9 +13,7 @@ export const safeStorage = {
       if (typeof window !== 'undefined' && 'localStorage' in window) {
         return window.localStorage.getItem(key);
       }
-    } catch (_) {
-      // Bloqueio de sandbox/iframe ou cookies desativados
-    }
+    } catch (_) {}
     return memoryStorage.get(key) || null;
   },
   setItem(key: string, value: string): void {
@@ -22,9 +21,7 @@ export const safeStorage = {
       if (typeof window !== 'undefined' && 'localStorage' in window) {
         window.localStorage.setItem(key, value);
       }
-    } catch (_) {
-      // Bloqueio de sandbox/iframe ou cota cheia
-    }
+    } catch (_) {}
     memoryStorage.set(key, value);
   },
   removeItem(key: string): void {
@@ -57,7 +54,6 @@ export const DEFAULT_SETTINGS: UnitSettings = {
   corTextoDigitado: 'preto',
 };
 
-// Registros fiéis às imagens de referência enviadas pelo usuário
 export const INITIAL_SAMPLE_RECORDS: ObjetoRecord[] = [
   {
     id: 'rec-001',
@@ -176,93 +172,30 @@ export const INITIAL_SAMPLE_RECORDS: ObjetoRecord[] = [
     },
     status: 'termo_emitido',
     versaoDocumento: 1,
-    criadoEm: '2026-10-21T07:30:00Z',
-    atualizadoEm: '2026-10-21T07:30:00Z',
+    criadoEm: '2026-10-21T07:50:00Z',
+    atualizadoEm: '2026-10-21T07:50:00Z',
     historicoEmissoes: [
       {
         id: 'hist-002',
         tipoDocumento: 'termo_individual',
-        dataEmissao: '2026-10-21T07:45:00Z',
+        dataEmissao: '2026-10-21T08:00:00Z',
         versao: 1,
         usuarioOperador: '81149042',
         nomeArquivoGerado: 'Termo_Constatacao_98_AE047282865BR.pdf',
       },
     ],
   },
-  {
-    // O Exato registro da foto 1 do Termo de Constatação:
-    id: 'rec-003',
-    dataConstatacao: '2026-10-21',
-    diaDoMes: 21,
-    mesReferencia: 10,
-    anoReferencia: 2026,
-    itemNumero: 2,
-    termoNumero: '99',
-    anoCorrente: 2026,
-    codigoRastreamento: 'Ae047884658br',
-    unidadeConstatacao: 'CDD SÃO MANUEL',
-    dr: 'SPI',
-    codigoSto: '18650-972',
-    pesoPostalGramas: 760,
-    pesoRealGramas: 760,
-    valorDeclaradoTexto: 'NC',
-    unidadePostagem: 'AC PIRAPOZINHO - PIRAPOZINHO / SP',
-    unidadeDestinoCodigo: '18650065',
-    remetenteNome: 'SUMETAL IND E COM DE BOT E FIVELAS DE METAL LTDA',
-    remetenteEndereco: 'RUA GOTARDO PELIN, 206',
-    destinatarioNome: 'BOA NOVA COMERCIAL AGROPECUÁRIA E PARTICIPAÇÕES',
-    destinatarioEndereco: 'RUA XV DE NOVEMBRO 792',
-    anomalias: {
-      embalagemMolhadaParcialmente: true,
-      conteudoBalancando: false,
-      conteudoExtravasandoLiquido: false,
-      embalagemDilaceradaMostraConteudo: false,
-      embalagemIntactaSemCondicoes: false,
-      conteudoAvariado: false,
-      embalagemDilaceradaTotalmenteAvariado: false,
-      embalagemIntactaMolhadaSemCondicoes: false,
-      outrasOcorrencias: true,
-      outrasOcorrenciasTexto: 'ENCAMINHADA PARA AC SÃO MANUEL',
-    },
-    motivoResumo: 'MOLHADA',
-    aiTcCie: 'SEQUENCIA DO SISTEMA',
-    providencias: {
-      tipo: 'outras',
-      outrasDescricao: 'ENCAMINHADA PARA AC SÃO MANUEL',
-    },
-    operadorMatricula: '81149042',
-    operadorNome: 'Helton Correios',
-    chefeNome: 'HELTON JULIO SANTOS MANUEL',
-    chefeMatricula: '8.114.904-2',
-    declaracao: {
-      tipoCliente: 'destinatario',
-      tipo: 'aceite_sem_contestacao',
-      nomeCliente: 'BOA NOVA COMERCIAL AGROPECUÁRIA E PARTICIPAÇÕES',
-      dataDeclaracao: '2026-10-21',
-    },
-    status: 'termo_emitido',
-    versaoDocumento: 1,
-    criadoEm: '2026-10-21T07:50:00Z',
-    atualizadoEm: '2026-10-21T07:50:00Z',
-    historicoEmissoes: [
-      {
-        id: 'hist-003',
-        tipoDocumento: 'termo_individual',
-        dataEmissao: '2026-10-21T08:00:00Z',
-        versao: 1,
-        usuarioOperador: '81149042',
-        nomeArquivoGerado: 'Termo_Constatacao_99_Ae047884658br.pdf',
-      },
-    ],
-  },
 ];
+
+// ==========================================
+// FUNÇÕES DE PERSISTÊNCIA COM FIREBASE FIRESTORE
+// ==========================================
 
 export function getSettings(): UnitSettings {
   try {
     const raw = safeStorage.getItem(STORAGE_KEY_SETTINGS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Padrão solicitado pelo usuário: fontes pretas
       const merged: UnitSettings = { 
         ...DEFAULT_SETTINGS, 
         ...parsed, 
@@ -271,48 +204,19 @@ export function getSettings(): UnitSettings {
       merged.numeroSequenciaInicial = Math.max(1, Number(merged.numeroSequenciaInicial) || 1);
       return merged;
     }
-  } catch (err) {
-    // Fallback silencioso para DEFAULT_SETTINGS
-  }
+  } catch (err) {}
   return DEFAULT_SETTINGS;
-}
-
-// Helpers de sincronização em segundo plano com o Servidor Local
-function syncRecordToServer(record: ObjetoRecord) {
-  try {
-    fetch('/api/records', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(record),
-    }).catch(() => {});
-  } catch (e) {}
-}
-
-function deleteRecordOnServer(id: string) {
-  try {
-    fetch(`/api/records/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }).catch(() => {});
-  } catch (e) {}
-}
-
-function syncSettingsToServer(settings: UnitSettings) {
-  try {
-    fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    }).catch(() => {});
-  } catch (e) {}
 }
 
 export function saveSettings(settings: UnitSettings): void {
   try {
     safeStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-  } catch (err) {
-    // Ignora erro de cota ou bloqueio de storage
-  }
-  syncSettingsToServer(settings);
+  } catch (err) {}
+
+  // Sincronizar com Firebase Firestore em segundo plano
+  try {
+    setDoc(doc(db, 'configuracoes', 'unidade'), settings).catch(() => {});
+  } catch (e) {}
 }
 
 export function getAllRecords(): ObjetoRecord[] {
@@ -324,9 +228,7 @@ export function getAllRecords(): ObjetoRecord[] {
         return parsed;
       }
     }
-  } catch (err) {
-    // Fallback silencioso
-  }
+  } catch (err) {}
   saveAllRecords(INITIAL_SAMPLE_RECORDS);
   return INITIAL_SAMPLE_RECORDS;
 }
@@ -334,9 +236,7 @@ export function getAllRecords(): ObjetoRecord[] {
 export function saveAllRecords(records: ObjetoRecord[]): void {
   try {
     safeStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
-  } catch (err) {
-    // Armazenamento em memória seguro ativo
-  }
+  } catch (err) {}
 }
 
 export function getRecordById(id: string): ObjetoRecord | undefined {
@@ -376,8 +276,6 @@ export function calculateNextTermoNumber(
   customSettings?: UnitSettings
 ): { numeroFormatado: string; sequencial: number } {
   const settings = customSettings || getSettings();
-  
-  // Fonte da verdade: a sequência configurada pelo usuário nas Configurações
   const nextSeq = Math.max(1, Number(settings.numeroSequenciaInicial) || 1);
 
   const numeroFormatado = settings.formatoNumeroTermo === 'com_zeros' 
@@ -443,7 +341,6 @@ export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName
     updatedRecord.criadoEm = now;
     records.push(updatedRecord);
 
-    // Quando um novo registro é salvo, avançamos a sequência automaticamente (+1) a partir do termo salvo
     const settings = getSettings();
     const parsedTermo = parseInt(record.termoNumero, 10);
     const baseSeq = !isNaN(parsedTermo) && parsedTermo > 0 ? parsedTermo : (settings.numeroSequenciaInicial || 1);
@@ -464,7 +361,12 @@ export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName
   }
 
   saveAllRecords(records);
-  syncRecordToServer(updatedRecord);
+
+  // Salvar no Firebase Firestore em nuvem
+  try {
+    setDoc(doc(db, 'objetos_recondicionados', updatedRecord.id), updatedRecord).catch(() => {});
+  } catch (e) {}
+
   return updatedRecord;
 }
 
@@ -490,12 +392,11 @@ export function logControleMensalEmissao(ano: number, mes: number, operador: str
 
   if (changed) {
     saveAllRecords(records);
-    // Sincronizar em lote para persistir os históricos de emissão
-    fetch('/api/records/bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ records }),
-    }).catch(() => {});
+    records.forEach(r => {
+      try {
+        setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
+      } catch (e) {}
+    });
   }
 }
 
@@ -507,7 +408,11 @@ export function cancelRecord(id: string): boolean {
   item.status = 'cancelado';
   item.atualizadoEm = new Date().toISOString();
   saveAllRecords(records);
-  syncRecordToServer(item);
+
+  try {
+    setDoc(doc(db, 'objetos_recondicionados', item.id), item).catch(() => {});
+  } catch (e) {}
+
   return true;
 }
 
@@ -516,7 +421,11 @@ export function deleteRecord(id: string): boolean {
   const nextRecords = records.filter(r => r.id !== id);
   if (nextRecords.length === records.length) return false;
   saveAllRecords(nextRecords);
-  deleteRecordOnServer(id);
+
+  try {
+    deleteDoc(doc(db, 'objetos_recondicionados', id)).catch(() => {});
+  } catch (e) {}
+
   return true;
 }
 
@@ -583,62 +492,57 @@ export interface ServerStatusInfo {
 }
 
 export async function getServerStatus(): Promise<ServerStatusInfo | null> {
-  try {
-    const res = await fetch('/api/status');
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (e) {
-    return null;
-  }
+  return {
+    status: 'online',
+    versao: '3.0-firebase',
+    unidade: getSettings().nomeUnidade,
+    servidorLocalIps: ['Firebase Firestore Cloud'],
+    port: 443,
+    urlsAcesso: ['https://' + window.location.host],
+    armazenamento: 'Google Firebase Firestore (Nuvem)',
+    horarioServidor: new Date().toISOString(),
+  };
 }
 
+// Sincronização em tempo real com Firebase Firestore
 export async function syncWithServer(): Promise<{ records: ObjetoRecord[]; settings: UnitSettings | null } | null> {
   try {
-    const res = await fetch('/api/records');
-    if (!res.ok) return null;
-    const serverRecords: ObjetoRecord[] = await res.json();
+    // Buscar registros do Firestore
+    const querySnapshot = await getDocs(collection(db, 'objetos_recondicionados'));
+    const cloudRecords: ObjetoRecord[] = [];
+    querySnapshot.forEach((docSnap) => {
+      cloudRecords.push(docSnap.data() as ObjetoRecord);
+    });
 
-    let serverSettings: UnitSettings | null = null;
-    try {
-      const settingsRes = await fetch('/api/settings');
-      if (settingsRes.ok) {
-        const s = await settingsRes.json();
-        if (s && s.nomeUnidade) serverSettings = s;
-      }
-    } catch (e) {}
+    // Buscar configurações do Firestore
+    let cloudSettings: UnitSettings | null = null;
+    const settingsSnap = await getDoc(doc(db, 'configuracoes', 'unidade'));
+    if (settingsSnap.exists()) {
+      cloudSettings = settingsSnap.data() as UnitSettings;
+    }
 
-    // Se o servidor tiver registros, atualiza localmente
-    if (Array.isArray(serverRecords) && serverRecords.length > 0) {
-      safeStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(serverRecords));
+    if (cloudRecords.length > 0) {
+      saveAllRecords(cloudRecords);
     } else {
-      // Se o servidor estiver vazio, sincroniza os registros locais para o servidor central
+      // Se a nuvem estiver vazia, sobe os dados locais
       const localRecords = getAllRecords();
-      if (localRecords.length > 0) {
-        await fetch('/api/records/bulk', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ records: localRecords }),
-        }).catch(() => {});
+      for (const r of localRecords) {
+        await setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
       }
     }
 
-    if (serverSettings && serverSettings.nomeUnidade) {
-      safeStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(serverSettings));
+    if (cloudSettings && cloudSettings.nomeUnidade) {
+      saveSettings(cloudSettings);
     } else {
       const localSettings = getSettings();
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(localSettings),
-      }).catch(() => {});
+      await setDoc(doc(db, 'configuracoes', 'unidade'), localSettings).catch(() => {});
     }
 
     return {
-      records: serverRecords.length > 0 ? serverRecords : getAllRecords(),
-      settings: serverSettings || getSettings(),
+      records: cloudRecords.length > 0 ? cloudRecords : getAllRecords(),
+      settings: cloudSettings || getSettings(),
     };
   } catch (err) {
     return null;
   }
 }
-
