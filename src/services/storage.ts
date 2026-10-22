@@ -213,9 +213,10 @@ export function saveSettings(settings: UnitSettings): void {
     safeStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
   } catch (err) {}
 
-  // Sincronizar com Firebase Firestore em segundo plano
+  // Sincronizar com Firebase Firestore em segundo plano, usando nome da unidade como ID
   try {
-    setDoc(doc(db, 'configuracoes', 'unidade'), settings).catch(() => {});
+    const unitId = (settings.nomeUnidade || 'padrao').trim().toUpperCase();
+    setDoc(doc(db, 'configuracoes', unitId), settings).catch(() => {});
   } catch (e) {}
 }
 
@@ -532,9 +533,11 @@ export async function syncWithServer(): Promise<{ records: ObjetoRecord[]; setti
       cloudRecords.push(docSnap.data() as ObjetoRecord);
     });
 
-    // Buscar configurações do Firestore
+    // Buscar configurações do Firestore para a unidade atual
     let cloudSettings: UnitSettings | null = null;
-    const settingsSnap = await getDoc(doc(db, 'configuracoes', 'unidade'));
+    const currentSettings = getSettings();
+    const unitId = (currentSettings.nomeUnidade || 'padrao').trim().toUpperCase();
+    const settingsSnap = await getDoc(doc(db, 'configuracoes', unitId));
     if (settingsSnap.exists()) {
       cloudSettings = settingsSnap.data() as UnitSettings;
     }
@@ -553,7 +556,7 @@ export async function syncWithServer(): Promise<{ records: ObjetoRecord[]; setti
       saveSettings(cloudSettings);
     } else {
       const localSettings = getSettings();
-      await setDoc(doc(db, 'configuracoes', 'unidade'), localSettings).catch(() => {});
+      await setDoc(doc(db, 'configuracoes', unitId), localSettings).catch(() => {});
     }
 
     return {
