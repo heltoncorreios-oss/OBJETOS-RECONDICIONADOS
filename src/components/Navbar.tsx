@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Package, ShieldCheck, Clock, MapPin, PlusCircle, Network, Link2, Check } from 'lucide-react';
+import { Package, ShieldCheck, Clock, MapPin, PlusCircle, Building2 } from 'lucide-react';
 import { UnitSettings } from '../types';
-import { ServerStatusInfo, getUnitShareUrl } from '../services/storage';
+import { ServerStatusInfo } from '../services/storage';
 import { CORREIOS_LOGO_SRC } from '../assets/correiosLogo';
 
 interface NavbarProps {
@@ -24,14 +24,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenMcuModal,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
-  const [copiedLink, setCopiedLink] = useState(false);
-
-  const handleCopyLink = () => {
-    const url = getUnitShareUrl(settings.nomeUnidade);
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 3000);
-  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -73,34 +65,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-lg tracking-tight text-white uppercase">CORREIOS</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCopyLink();
-                  }}
-                  title="Copiar link exclusivo desta unidade para acessar diretamente sem reconfigurar"
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-900/90 hover:bg-sky-800 text-[11px] font-semibold text-yellow-300 border border-yellow-300/40 transition-all shadow-xs cursor-pointer active:scale-95"
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-300" />
-                      <span className="text-emerald-300">Link Copiado!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Link2 className="w-3 h-3 text-yellow-300" />
-                      <span>Copiar Link da Unidade</span>
-                    </>
-                  )}
-                </button>
+                <span className="text-[11px] font-semibold text-sky-200">· Controle de Objetos Recondicionados</span>
               </div>
               <div className="flex items-center gap-2 text-xs text-sky-100 flex-wrap">
                 <span className="font-semibold text-yellow-300">{settings.nomeUnidade}</span>
                 <span>·</span>
                 <span className="flex items-center gap-1 text-sky-200">
                   <MapPin className="w-3 h-3 text-yellow-300" />
-                  MCU: <strong className="text-white">{settings.mcu || '18650972'}</strong> (STO: {settings.codigoSto})
+                  MCU: <strong className="text-white">{settings.mcu || '00437351'}</strong> {settings.codigoSto ? `(STO: ${settings.codigoSto})` : ''}
                 </span>
                 {onOpenMcuModal && (
                   <button
@@ -110,9 +82,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       onOpenMcuModal();
                     }}
                     title="Alternar de unidade postal ou cadastrar outro MCU"
-                    className="ml-1 px-2 py-0.5 rounded bg-sky-950/70 hover:bg-sky-800 text-[10px] font-bold text-sky-200 hover:text-white border border-sky-400/40 transition-all cursor-pointer shadow-xs active:scale-95"
+                    className="ml-1 inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-yellow-400 hover:bg-yellow-300 text-[10px] font-bold text-[#002D56] transition-all cursor-pointer shadow-xs active:scale-95"
                   >
-                    Trocar MCU / Unidade
+                    <Building2 className="w-3 h-3" />
+                    <span>Trocar MCU / Unidade</span>
                   </button>
                 )}
               </div>
@@ -128,20 +101,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-900/60 border border-sky-700/50">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Gerente: <strong className="text-white font-medium">{settings.chefeNome}</strong></span>
+              <span>Gerente: <strong className="text-white font-medium">{settings.chefeNome || 'Não informado'}</strong></span>
             </div>
-
-            {serverInfo && (
-              <button
-                onClick={() => onTabChange('configuracoes')}
-                title="Servidor local ativo para múltiplos computadores. Clique para ver IPs de acesso."
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/60 text-emerald-300 text-xs hover:bg-emerald-900/80 transition-colors cursor-pointer"
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <Network className="w-3.5 h-3.5 text-emerald-300" />
-                <span className="font-semibold">Banco Local Conectado</span>
-              </button>
-            )}
 
             {/* Quick Action button */}
             <button

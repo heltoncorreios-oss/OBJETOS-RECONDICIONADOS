@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  Settings, 
   Save, 
   Download, 
   Upload, 
@@ -9,13 +8,7 @@ import {
   Building2, 
   ShieldCheck, 
   Palette, 
-  Database,
-  Network,
-  Copy,
-  Check,
-  Server,
-  Link2,
-  Share2
+  Database
 } from 'lucide-react';
 import { UnitSettings } from '../types';
 import { 
@@ -25,8 +18,7 @@ import {
   resetToSampleData,
   setSequencialManual,
   DEFAULT_SETTINGS,
-  ServerStatusInfo,
-  getUnitShareUrl
+  ServerStatusInfo
 } from '../services/storage';
 
 interface ConfiguracoesViewProps {
@@ -49,19 +41,11 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
   const [formData, setFormData] = useState<UnitSettings>({ ...settings });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [targetNewUnit, setTargetNewUnit] = useState('');
 
   // Atualizar formulário apenas quando a unidade ativa mudar
   React.useEffect(() => {
     setFormData({ ...settings });
   }, [settings.nomeUnidade, settings.mcu]);
-
-  const handleCopy = (url: string) => {
-    navigator.clipboard.writeText(url);
-    setCopiedUrl(url);
-    setTimeout(() => setCopiedUrl(null), 3000);
-  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,67 +129,35 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
         )}
       </div>
 
-      {/* Card de Link Exclusivo da Unidade para Acesso Direto */}
-      <div className="bg-gradient-to-r from-sky-900 to-[#00416B] text-white rounded-xl shadow-md p-6 space-y-4 border border-sky-700">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-lg bg-yellow-400/20 border border-yellow-400/40 flex items-center justify-center shrink-0">
-              <Link2 className="w-6 h-6 text-yellow-300" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-yellow-300">Acesso Direto Sem Reconfigurar</span>
-              </div>
-              <h2 className="text-lg font-black text-white tracking-tight">
-                Link Exclusivo de {settings.nomeUnidade}
-              </h2>
-              <span className="text-xs text-sky-200">
-                Ao abrir por este link, o sistema já entra automaticamente com o nome, STO e sequencial desta unidade.
-              </span>
-            </div>
+      {/* Banner de Identificação da Unidade por MCU */}
+      <div className="bg-gradient-to-r from-sky-900 to-[#00416B] text-white rounded-xl shadow-md p-5 border border-sky-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-lg bg-yellow-400/20 border border-yellow-400/40 flex items-center justify-center shrink-0">
+            <Building2 className="w-6 h-6 text-yellow-300" />
           </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-yellow-300">Ambiente Ativo</span>
+            </div>
+            <h2 className="text-lg font-black text-white tracking-tight">
+              {settings.nomeUnidade}
+            </h2>
+            <span className="text-xs text-sky-200">
+              MCU: <strong className="text-white">{settings.mcu || '00437351'}</strong> {settings.codigoSto ? `· STO: ${settings.codigoSto}` : ''} ({settings.dr || 'SPI'})
+            </span>
+          </div>
+        </div>
 
+        {onOpenMcuModal && (
           <button
             type="button"
-            onClick={() => handleCopy(getUnitShareUrl(settings.nomeUnidade))}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#FFCC00] hover:bg-yellow-300 text-[#002D56] font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer self-start sm:self-auto shrink-0 active:scale-95"
+            onClick={onOpenMcuModal}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#FFCC00] hover:bg-yellow-300 text-[#002D56] font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer shrink-0 self-start sm:self-auto active:scale-95"
           >
-            {copiedUrl === getUnitShareUrl(settings.nomeUnidade) ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-800" />
-                <span>Link Copiado com Sucesso!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                <span>Copiar Link Desta Unidade</span>
-              </>
-            )}
+            <Building2 className="w-4 h-4 text-[#002D56]" />
+            <span>Trocar MCU / Cadastrar Nova Unidade</span>
           </button>
-        </div>
-
-        <div className="bg-black/25 rounded-lg p-3 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono">
-          <span className="text-yellow-200 truncate">{getUnitShareUrl(settings.nomeUnidade)}</span>
-          <span className="text-[11px] text-sky-200 shrink-0 font-sans font-medium">Salve nos Favoritos do Chrome ou Edge</span>
-        </div>
-
-        {/* Alternar ou Criar Ambiente para Outra Unidade */}
-        <div className="pt-3 border-t border-sky-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs text-sky-100">
-            <strong>Deseja trocar de agência/CDD ou cadastrar nova unidade?</strong>
-            <p className="text-[11px] text-sky-200">Pesquise pelo MCU da unidade ou acesse a lista rápida de unidades cadastradas:</p>
-          </div>
-          {onOpenMcuModal && (
-            <button
-              type="button"
-              onClick={onOpenMcuModal}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-yellow-400 hover:bg-yellow-300 text-[#002D56] font-bold text-xs rounded-lg transition-all shadow-sm cursor-pointer shrink-0"
-            >
-              <Building2 className="w-4 h-4 text-[#002D56]" />
-              <span>Consultar / Trocar por MCU</span>
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
@@ -514,86 +466,6 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
             <RotateCcw className="w-4 h-4 text-red-700" />
             <span>Restaurar Relatórios Originais do Modelo</span>
           </button>
-        </div>
-      </div>
-
-      {/* 5. Rede Local e Uso Multi-Computador */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <Network className="w-5 h-5 text-[#00416B]" />
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-tight">
-              5. Rede Local & Acesso Multi-Computador (Servidor Central)
-            </h2>
-          </div>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-            Banco Local Ativo
-          </span>
-        </div>
-
-        <p className="text-xs text-slate-600 leading-relaxed">
-          Este sistema opera com <strong>Node.js portátil e banco de dados local centralizado</strong>. Todos os computadores da sua unidade podem salvar, consultar e emitir termos simultaneamente na mesma base de dados.
-        </p>
-
-        {serverInfo && serverInfo.urlsAcesso && serverInfo.urlsAcesso.length > 0 ? (
-          <div className="bg-sky-50 border border-sky-200 rounded-lg p-4 space-y-2">
-            <span className="text-xs font-bold text-sky-900 block">
-              Endereços para os colegas acessarem de outros computadores da unidade:
-            </span>
-            <div className="space-y-1.5">
-              {serverInfo.urlsAcesso.map((url, idx) => (
-                <div key={idx} className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded border border-sky-200 text-xs font-mono">
-                  <span className="font-bold text-sky-800">{url}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(url)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-700 hover:bg-sky-800 text-white rounded text-[11px] font-sans font-semibold cursor-pointer"
-                  >
-                    {copiedUrl === url ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-300" />
-                        <span>Copiado!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copiar Link</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              ))}
-            </div>
-            <span className="text-[11px] text-sky-700 block">
-              Basta abrir o Chrome ou Edge em qualquer outro PC da mesma rede e colar o endereço acima.
-            </span>
-          </div>
-        ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-            Ao iniciar pelo arquivo <code className="font-bold text-[#00416B]">INICIAR_SISTEMA.bat</code> na máquina da unidade, os endereços IP da rede local aparecerão aqui automaticamente.
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
-            <span className="font-bold text-slate-800 block mb-1">INICIAR_SISTEMA.bat</span>
-            <p className="text-slate-600 text-[11px]">
-              Dá partida no servidor local, identifica o Node.js embutido e abre o navegador automaticamente.
-            </p>
-          </div>
-          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
-            <span className="font-bold text-slate-800 block mb-1">BAIXAR_NODE_PORTATIL.bat</span>
-            <p className="text-slate-600 text-[11px]">
-              Baixa e descompacta o Node.js oficial na pasta local sem precisar de senha de administrador no Windows.
-            </p>
-          </div>
-          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
-            <span className="font-bold text-slate-800 block mb-1">BACKUP_BANCO_DADOS.bat</span>
-            <p className="text-slate-600 text-[11px]">
-              Copia o arquivo <code className="font-semibold">data/banco_dados.json</code> com data e hora para a pasta de backups em 1 clique.
-            </p>
-          </div>
         </div>
       </div>
 
