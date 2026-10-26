@@ -397,6 +397,9 @@ export function saveSettings(settings: UnitSettings): void {
   try {
     safeStorage.setItem(key, JSON.stringify(settings));
     safeStorage.setItem('cdd_active_unit', unit);
+    if (settings.mcu) {
+      setActiveMcu(settings.mcu);
+    }
     safeStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
   } catch (err) {}
 

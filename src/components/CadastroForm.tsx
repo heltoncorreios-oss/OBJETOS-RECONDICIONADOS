@@ -109,7 +109,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
       setPesoRealGramas(editingRecord.pesoRealGramas);
       setValorDeclaradoTexto(editingRecord.valorDeclaradoTexto || 'NC');
       setUnidadePostagem(editingRecord.unidadePostagem);
-      setUnidadeDestinoCodigo(editingRecord.unidadeDestinoCodigo || settings.destinoPadrao);
+      setUnidadeDestinoCodigo(editingRecord.unidadeDestinoCodigo || settings.destinoPadrao || '18650065');
 
       setRemetenteNome(editingRecord.remetenteNome);
       setRemetenteEndereco(editingRecord.remetenteEndereco);
@@ -129,7 +129,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
       const nextItem = getNextItemNumber(dataConstatacao);
       setItemNumero(nextItem);
     }
-  }, [editingRecord, settings, dataConstatacao]);
+  }, [editingRecord?.id]);
 
   useEffect(() => {
     if (dataConstatacao) {
@@ -268,8 +268,8 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
               <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-900 text-white">
                 Fontes em Preto Oficial ECT
               </span>
-              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                CDD São Manuel
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-sky-100 text-[#00416B] border border-sky-200">
+                {settings.nomeUnidade}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
@@ -289,10 +289,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
           <button
             type="button"
             onClick={() => handleSubmit(false)}
-            className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-lg cursor-pointer"
+            className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-[#00416B] hover:bg-[#002D56] rounded-lg shadow-xs cursor-pointer"
           >
             <Save className="w-4 h-4 inline mr-1.5" />
-            Salvar
+            {editingRecord ? 'Salvar Alterações' : 'Salvar'}
           </button>
           <button
             type="button"
@@ -300,7 +300,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             className="px-4 py-2 text-xs sm:text-sm font-bold text-[#002D56] bg-[#FFCC00] hover:bg-yellow-300 rounded-lg shadow-sm cursor-pointer"
           >
             <FileCheck2 className="w-4 h-4 inline mr-1.5" />
-            Salvar e Gerar Termo (PDF)
+            {editingRecord ? 'Salvar Alterações e Reemitir PDF' : 'Salvar e Gerar Termo (PDF)'}
           </button>
         </div>
       </div>
@@ -847,10 +847,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
           <button
             type="button"
             onClick={() => handleSubmit(false)}
-            className="px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-lg cursor-pointer"
+            className="px-5 py-2 text-xs sm:text-sm font-bold text-white bg-[#00416B] hover:bg-[#002D56] rounded-lg shadow-xs cursor-pointer"
           >
             <Save className="w-4 h-4 inline mr-1.5" />
-            Salvar
+            {editingRecord ? 'Salvar Alterações' : 'Salvar Objeto'}
           </button>
           <button
             type="button"
@@ -858,7 +858,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             className="px-6 py-2.5 text-xs sm:text-sm font-bold text-[#002D56] bg-[#FFCC00] hover:bg-yellow-300 rounded-lg shadow-md cursor-pointer"
           >
             <FileCheck2 className="w-4 h-4 inline mr-1.5" />
-            Salvar e Emitir Termo (PDF)
+            {editingRecord ? 'Salvar Alterações e Reemitir PDF' : 'Salvar e Emitir Termo (PDF)'}
           </button>
         </div>
       </div>

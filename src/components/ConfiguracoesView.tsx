@@ -52,10 +52,10 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [targetNewUnit, setTargetNewUnit] = useState('');
 
-  // Atualizar formulário quando a unidade mudar
+  // Atualizar formulário apenas quando a unidade ativa mudar
   React.useEffect(() => {
     setFormData({ ...settings });
-  }, [settings]);
+  }, [settings.nomeUnidade, settings.mcu]);
 
   const handleCopy = (url: string) => {
     navigator.clipboard.writeText(url);

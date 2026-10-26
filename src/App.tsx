@@ -89,8 +89,20 @@ export default function App() {
     const doSync = () => {
       syncWithServer().then(res => {
         if (res) {
-          setRecords(res.records);
-          if (res.settings) setSettings(res.settings);
+          setRecords(prev => {
+            if (prev.length !== res.records.length || JSON.stringify(prev) !== JSON.stringify(res.records)) {
+              return res.records;
+            }
+            return prev;
+          });
+          if (res.settings) {
+            setSettings(prev => {
+              if (JSON.stringify(prev) !== JSON.stringify(res.settings)) {
+                return res.settings!;
+              }
+              return prev;
+            });
+          }
         }
       });
       getServerStatus().then(info => {
