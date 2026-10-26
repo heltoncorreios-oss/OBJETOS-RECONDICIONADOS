@@ -20,7 +20,10 @@ import {
   syncWithServer,
   getServerStatus,
   ServerStatusInfo,
-  exportDataToJson 
+  exportDataToJson,
+  getActiveUnitName,
+  setActiveUnitName,
+  getUnitShareUrl 
 } from './services/storage';
 import { 
   gerarTermoConstatacaoPDF, 
@@ -72,7 +75,11 @@ export default function App() {
 
   // Carregar dados e sincronizar com o Servidor Local Central
   useEffect(() => {
-    refreshData();
+    // Sincronizar parâmetro da URL
+    const activeUnit = getActiveUnitName();
+    setActiveUnitName(activeUnit, true);
+
+    refreshData(activeUnit);
 
     const doSync = () => {
       syncWithServer().then(res => {
@@ -98,11 +105,23 @@ export default function App() {
     };
   }, []);
 
-  const refreshData = () => {
-    const loadedRecords = getAllRecords();
-    const loadedSettings = getSettings();
+  const refreshData = (unit?: string) => {
+    const loadedRecords = getAllRecords(unit);
+    const loadedSettings = getSettings(unit);
     setRecords(loadedRecords);
     setSettings(loadedSettings);
+  };
+
+  const handleSwitchUnit = (newUnit: string) => {
+    setActiveUnitName(newUnit, true);
+    refreshData(newUnit);
+    showToast(`Ambiente alterado para: ${newUnit}`);
+    syncWithServer(newUnit).then(res => {
+      if (res) {
+        setRecords(res.records);
+        if (res.settings) setSettings(res.settings);
+      }
+    });
   };
 
   // Handlers para Ações de PDF
@@ -264,6 +283,7 @@ export default function App() {
         settings={settings}
         monthlyCount={currentMonthRecords.length}
         serverInfo={serverInfo}
+        onSwitchUnit={handleSwitchUnit}
       />
 
       {/* Sub-header Context Banner */}
@@ -282,7 +302,7 @@ export default function App() {
           <div className="flex items-center gap-3 text-[11px] text-slate-500">
             <span>Período Vigente: <strong className="text-slate-800">{MESES_POR_EXTENSO[currentMonth - 1]} / {currentYear}</strong></span>
             <span>·</span>
-            <span>Ambiente: <strong className="text-slate-800">CDD São Manuel (ECT)</strong></span>
+            <span>Unidade Ativa: <strong className="text-[#00416B] font-bold">{settings.nomeUnidade}</strong></span>
           </div>
         </div>
       </div>
@@ -332,12 +352,15 @@ export default function App() {
           <ConfiguracoesView
             settings={settings}
             serverInfo={serverInfo}
+            onSwitchUnit={handleSwitchUnit}
             onSettingsUpdated={(newSettings) => {
+              setActiveUnitName(newSettings.nomeUnidade, true);
               setSettings(newSettings);
+              refreshData(newSettings.nomeUnidade);
               showToast('Configurações atualizadas com sucesso!');
             }}
             onDataReset={() => {
-              refreshData();
+              refreshData(settings.nomeUnidade);
               showToast('Dados recarregados com sucesso!');
             }}
           />

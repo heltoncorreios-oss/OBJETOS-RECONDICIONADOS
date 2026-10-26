@@ -191,36 +191,117 @@ export const INITIAL_SAMPLE_RECORDS: ObjetoRecord[] = [
 // FUNÇÕES DE PERSISTÊNCIA COM FIREBASE FIRESTORE
 // ==========================================
 
-export function getSettings(): UnitSettings {
+// ==========================================
+// IDENTIFICAÇÃO E LINKS EXCLUSIVOS POR UNIDADE
+// ==========================================
+
+export function getActiveUnitName(): string {
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const unitFromParam = params.get('unidade') || params.get('u');
+    if (unitFromParam && unitFromParam.trim()) {
+      return unitFromParam.trim().toUpperCase();
+    }
+  }
   try {
+    const lastActive = safeStorage.getItem('cdd_active_unit');
+    if (lastActive && lastActive.trim()) {
+      return lastActive.trim().toUpperCase();
+    }
     const raw = safeStorage.getItem(STORAGE_KEY_SETTINGS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.nomeUnidade) {
+        return parsed.nomeUnidade.trim().toUpperCase();
+      }
+    }
+  } catch (e) {}
+  return DEFAULT_SETTINGS.nomeUnidade;
+}
+
+export function setActiveUnitName(unitName: string, updateUrl = true): void {
+  const clean = unitName.trim().toUpperCase();
+  safeStorage.setItem('cdd_active_unit', clean);
+  if (updateUrl && typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    url.searchParams.set('unidade', clean);
+    window.history.replaceState({}, '', url.toString());
+  }
+}
+
+export function getUnitShareUrl(unitName?: string): string {
+  const unit = (unitName || getActiveUnitName()).trim().toUpperCase();
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    url.searchParams.set('unidade', unit);
+    return url.toString();
+  }
+  return `?unidade=${encodeURIComponent(unit)}`;
+}
+
+export function getUnitSettingsKey(unitName: string): string {
+  return `cdd_settings_${unitName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+}
+
+// ==========================================
+// FUNÇÕES DE PERSISTÊNCIA COM FIREBASE FIRESTORE
+// ==========================================
+
+export function getSettings(targetUnit?: string): UnitSettings {
+  const unit = (targetUnit || getActiveUnitName()).trim().toUpperCase();
+  const key = getUnitSettingsKey(unit);
+  try {
+    const raw = safeStorage.getItem(key) || (unit === DEFAULT_SETTINGS.nomeUnidade ? safeStorage.getItem(STORAGE_KEY_SETTINGS) : null);
     if (raw) {
       const parsed = JSON.parse(raw);
       const merged: UnitSettings = { 
         ...DEFAULT_SETTINGS, 
         ...parsed, 
+        nomeUnidade: unit,
         corTextoDigitado: parsed.corTextoDigitado === 'vermelho' ? 'preto' : (parsed.corTextoDigitado || 'preto') 
       };
       merged.numeroSequenciaInicial = Math.max(1, Number(merged.numeroSequenciaInicial) || 1);
       return merged;
     }
   } catch (err) {}
-  return DEFAULT_SETTINGS;
+
+  if (unit === DEFAULT_SETTINGS.nomeUnidade) {
+    return DEFAULT_SETTINGS;
+  }
+
+  // Configurações padrão limpas para uma nova unidade com sequencial iniciando em 1
+  return {
+    ...DEFAULT_SETTINGS,
+    nomeUnidade: unit,
+    codigoSto: '00000-000',
+    chefeNome: '',
+    chefeMatricula: '',
+    operadorMatriculaPadrao: '',
+    operadorPadraoNome: '',
+    numeroSequenciaInicial: 1,
+    sequencialGeral: 0,
+    ultimoSequencialAno: {},
+    ultimoSequencialMes: {},
+  };
 }
 
 export function saveSettings(settings: UnitSettings): void {
+  const unit = (settings.nomeUnidade || 'PADRAO').trim().toUpperCase();
+  const key = getUnitSettingsKey(unit);
+
   try {
+    safeStorage.setItem(key, JSON.stringify(settings));
+    safeStorage.setItem('cdd_active_unit', unit);
     safeStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
   } catch (err) {}
 
-  // Sincronizar com Firebase Firestore em segundo plano, usando nome da unidade como ID
+  // Sincronizar com Firebase Firestore usando o nome da unidade como ID do documento
   try {
-    const unitId = (settings.nomeUnidade || 'padrao').trim().toUpperCase();
-    setDoc(doc(db, 'configuracoes', unitId), settings).catch(() => {});
+    setDoc(doc(db, 'configuracoes', unit), settings).catch(() => {});
   } catch (e) {}
 }
 
-export function getAllRecords(): ObjetoRecord[] {
+export function getRawAllRecords(): ObjetoRecord[] {
   let allRecords: ObjetoRecord[] = [];
   try {
     const raw = safeStorage.getItem(STORAGE_KEY_RECORDS);
@@ -237,19 +318,19 @@ export function getAllRecords(): ObjetoRecord[] {
     saveAllRecords(allRecords);
   }
 
-  // Filtrar estritamente pelos registros da unidade atual (configurada nas Configurações)
-  const currentSettings = getSettings();
-  const unitName = (currentSettings.nomeUnidade || '').trim().toUpperCase();
+  return allRecords;
+}
+
+export function getAllRecords(targetUnit?: string): ObjetoRecord[] {
+  const allRecords = getRawAllRecords();
+  const unitName = (targetUnit || getActiveUnitName()).trim().toUpperCase();
   
   if (!unitName) return allRecords;
 
-  const filtered = allRecords.filter(r => {
+  return allRecords.filter(r => {
     const recUnit = (r.unidadeConstatacao || '').trim().toUpperCase();
-    // Se o registro não tiver unidade definida ou pertencer à unidade atual, exibe
-    return !recUnit || recUnit === unitName;
+    return recUnit === unitName;
   });
-
-  return filtered.length > 0 ? filtered : allRecords;
 }
 
 export function saveAllRecords(records: ObjetoRecord[]): void {
@@ -259,12 +340,12 @@ export function saveAllRecords(records: ObjetoRecord[]): void {
 }
 
 export function getRecordById(id: string): ObjetoRecord | undefined {
-  const records = getAllRecords();
-  return records.find(r => r.id === id);
+  const all = getRawAllRecords();
+  return all.find(r => r.id === id);
 }
 
-export function getRecordsByMonth(ano: number, mes: number): ObjetoRecord[] {
-  const records = getAllRecords();
+export function getRecordsByMonth(ano: number, mes: number, targetUnit?: string): ObjetoRecord[] {
+  const records = getAllRecords(targetUnit);
   return records
     .filter(r => r.anoReferencia === ano && r.mesReferencia === mes && r.status !== 'cancelado')
     .sort((a, b) => {
@@ -275,17 +356,17 @@ export function getRecordsByMonth(ano: number, mes: number): ObjetoRecord[] {
     });
 }
 
-export function getNextItemNumber(dataConstatacao: string, excludeId?: string): number {
-  const records = getAllRecords().filter(r => r.dataConstatacao === dataConstatacao && r.id !== excludeId && r.status !== 'cancelado');
+export function getNextItemNumber(dataConstatacao: string, excludeId?: string, targetUnit?: string): number {
+  const records = getAllRecords(targetUnit).filter(r => r.dataConstatacao === dataConstatacao && r.id !== excludeId && r.status !== 'cancelado');
   if (records.length === 0) return 1;
   const maxItem = Math.max(...records.map(r => r.itemNumero || 0));
   return maxItem + 1;
 }
 
-export function checkDuplicateTracking(codigo: string, excludeId?: string): ObjetoRecord | null {
+export function checkDuplicateTracking(codigo: string, excludeId?: string, targetUnit?: string): ObjetoRecord | null {
   const cleanCode = codigo.trim().toUpperCase();
   if (!cleanCode) return null;
-  const records = getAllRecords();
+  const records = getAllRecords(targetUnit);
   const found = records.find(r => r.codigoRastreamento.trim().toUpperCase() === cleanCode && r.id !== excludeId && r.status !== 'cancelado');
   return found || null;
 }
@@ -304,8 +385,9 @@ export function calculateNextTermoNumber(
   return { numeroFormatado, sequencial: nextSeq };
 }
 
-export function allocateNextTermoNumber(dataConstatacao: string): { numeroFormatado: string; sequencial: number } {
-  const settings = getSettings();
+export function allocateNextTermoNumber(dataConstatacao: string, targetUnit?: string): { numeroFormatado: string; sequencial: number } {
+  const activeUnit = targetUnit || getActiveUnitName();
+  const settings = getSettings(activeUnit);
   const { numeroFormatado, sequencial } = calculateNextTermoNumber(dataConstatacao, settings);
   
   const dateObj = new Date(dataConstatacao + 'T12:00:00Z');
@@ -324,12 +406,14 @@ export function allocateNextTermoNumber(dataConstatacao: string): { numeroFormat
 }
 
 export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName?: string): ObjetoRecord {
-  const records = getAllRecords();
-  const existingIdx = records.findIndex(r => r.id === record.id);
+  const activeUnit = (record.unidadeConstatacao || getActiveUnitName()).trim().toUpperCase();
+  const allRecords = getRawAllRecords();
+  const existingIdx = allRecords.findIndex(r => r.id === record.id);
   const now = new Date().toISOString();
 
   let updatedRecord: ObjetoRecord = {
     ...record,
+    unidadeConstatacao: activeUnit,
     atualizadoEm: now,
   };
 
@@ -355,12 +439,12 @@ export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName
   }
 
   if (existingIdx >= 0) {
-    records[existingIdx] = updatedRecord;
+    allRecords[existingIdx] = updatedRecord;
   } else {
     updatedRecord.criadoEm = now;
-    records.push(updatedRecord);
+    allRecords.push(updatedRecord);
 
-    const settings = getSettings();
+    const settings = getSettings(activeUnit);
     const parsedTermo = parseInt(record.termoNumero, 10);
     const baseSeq = !isNaN(parsedTermo) && parsedTermo > 0 ? parsedTermo : (settings.numeroSequenciaInicial || 1);
     const nextSeq = baseSeq + 1;
@@ -379,7 +463,7 @@ export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName
     saveSettings(settings);
   }
 
-  saveAllRecords(records);
+  saveAllRecords(allRecords);
 
   // Salvar no Firebase Firestore em nuvem
   try {
@@ -390,12 +474,14 @@ export function saveRecord(record: ObjetoRecord, markAsEmitted = false, fileName
 }
 
 export function logControleMensalEmissao(ano: number, mes: number, operador: string, fileName: string): void {
-  const records = getAllRecords();
+  const allRecords = getRawAllRecords();
+  const currentUnit = getActiveUnitName();
   const now = new Date().toISOString();
   let changed = false;
 
-  records.forEach(r => {
-    if (r.anoReferencia === ano && r.mesReferencia === mes && r.status !== 'cancelado') {
+  allRecords.forEach(r => {
+    const rUnit = (r.unidadeConstatacao || '').trim().toUpperCase();
+    if (rUnit === currentUnit && r.anoReferencia === ano && r.mesReferencia === mes && r.status !== 'cancelado') {
       r.historicoEmissoes = r.historicoEmissoes || [];
       r.historicoEmissoes.push({
         id: 'hist-cm-' + Date.now() + '-' + r.id,
@@ -410,23 +496,26 @@ export function logControleMensalEmissao(ano: number, mes: number, operador: str
   });
 
   if (changed) {
-    saveAllRecords(records);
-    records.forEach(r => {
-      try {
-        setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
-      } catch (e) {}
+    saveAllRecords(allRecords);
+    allRecords.forEach(r => {
+      const rUnit = (r.unidadeConstatacao || '').trim().toUpperCase();
+      if (rUnit === currentUnit) {
+        try {
+          setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
+        } catch (e) {}
+      }
     });
   }
 }
 
 export function cancelRecord(id: string): boolean {
-  const records = getAllRecords();
-  const item = records.find(r => r.id === id);
+  const allRecords = getRawAllRecords();
+  const item = allRecords.find(r => r.id === id);
   if (!item) return false;
 
   item.status = 'cancelado';
   item.atualizadoEm = new Date().toISOString();
-  saveAllRecords(records);
+  saveAllRecords(allRecords);
 
   try {
     setDoc(doc(db, 'objetos_recondicionados', item.id), item).catch(() => {});
@@ -436,9 +525,9 @@ export function cancelRecord(id: string): boolean {
 }
 
 export function deleteRecord(id: string): boolean {
-  const records = getAllRecords();
-  const nextRecords = records.filter(r => r.id !== id);
-  if (nextRecords.length === records.length) return false;
+  const allRecords = getRawAllRecords();
+  const nextRecords = allRecords.filter(r => r.id !== id);
+  if (nextRecords.length === allRecords.length) return false;
   saveAllRecords(nextRecords);
 
   try {
@@ -448,12 +537,13 @@ export function deleteRecord(id: string): boolean {
   return true;
 }
 
-export function exportDataToJson(): string {
+export function exportDataToJson(targetUnit?: string): string {
+  const unit = targetUnit || getActiveUnitName();
   const data = {
     versaoExport: '3.0',
     dataExportacao: new Date().toISOString(),
-    settings: getSettings(),
-    records: getAllRecords(),
+    settings: getSettings(unit),
+    records: getAllRecords(unit),
   };
   return JSON.stringify(data, null, 2);
 }
@@ -467,15 +557,31 @@ export function importDataFromJson(jsonStr: string): { success: boolean; count: 
     if (data.settings) {
       saveSettings(data.settings);
     }
-    saveAllRecords(data.records);
+    
+    // Mesclar com registros existentes para não apagar outras unidades
+    const all = getRawAllRecords();
+    const map = new Map<string, ObjetoRecord>();
+    all.forEach(r => map.set(r.id, r));
+    data.records.forEach((r: ObjetoRecord) => map.set(r.id, r));
+    const merged = Array.from(map.values());
+    saveAllRecords(merged);
+
+    // Salvar no Firestore
+    for (const r of data.records) {
+      try {
+        setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
+      } catch (e) {}
+    }
+
     return { success: true, count: data.records.length };
   } catch (err: unknown) {
     return { success: false, count: 0, error: err instanceof Error ? err.message : 'Erro ao analisar arquivo JSON.' };
   }
 }
 
-export function setSequencialManual(novoSequencial: number): UnitSettings {
-  const settings = getSettings();
+export function setSequencialManual(novoSequencial: number, targetUnit?: string): UnitSettings {
+  const activeUnit = targetUnit || getActiveUnitName();
+  const settings = getSettings(activeUnit);
   const dateObj = new Date();
   const ano = dateObj.getFullYear();
   const mes = dateObj.getMonth() + 1;
@@ -496,7 +602,8 @@ export function setSequencialManual(novoSequencial: number): UnitSettings {
 
 export function resetToSampleData(): void {
   saveSettings(DEFAULT_SETTINGS);
-  saveAllRecords(INITIAL_SAMPLE_RECORDS);
+  const all = getRawAllRecords().filter(r => (r.unidadeConstatacao || '').toUpperCase() !== DEFAULT_SETTINGS.nomeUnidade);
+  saveAllRecords([...all, ...INITIAL_SAMPLE_RECORDS]);
 }
 
 export interface ServerStatusInfo {
@@ -511,59 +618,82 @@ export interface ServerStatusInfo {
 }
 
 export async function getServerStatus(): Promise<ServerStatusInfo | null> {
+  const unit = getActiveUnitName();
   return {
     status: 'online',
-    versao: '3.0-firebase',
-    unidade: getSettings().nomeUnidade,
+    versao: '3.0-firebase-multi-unidade',
+    unidade: unit,
     servidorLocalIps: ['Firebase Firestore Cloud'],
     port: 443,
-    urlsAcesso: ['https://' + window.location.host],
-    armazenamento: 'Google Firebase Firestore (Nuvem)',
+    urlsAcesso: [getUnitShareUrl(unit)],
+    armazenamento: 'Google Firebase Firestore (Nuvem Compartilhada)',
     horarioServidor: new Date().toISOString(),
   };
 }
 
 // Sincronização em tempo real com Firebase Firestore
-export async function syncWithServer(): Promise<{ records: ObjetoRecord[]; settings: UnitSettings | null } | null> {
+export async function syncWithServer(customUnit?: string): Promise<{ records: ObjetoRecord[]; settings: UnitSettings | null } | null> {
   try {
-    // Buscar registros do Firestore
+    const activeUnit = (customUnit || getActiveUnitName()).trim().toUpperCase();
+
+    // 1. Buscar registros do Firestore
     const querySnapshot = await getDocs(collection(db, 'objetos_recondicionados'));
     const cloudRecords: ObjetoRecord[] = [];
     querySnapshot.forEach((docSnap) => {
       cloudRecords.push(docSnap.data() as ObjetoRecord);
     });
 
-    // Buscar configurações do Firestore para a unidade atual
-    let cloudSettings: UnitSettings | null = null;
-    const currentSettings = getSettings();
-    const unitId = (currentSettings.nomeUnidade || 'padrao').trim().toUpperCase();
-    const settingsSnap = await getDoc(doc(db, 'configuracoes', unitId));
-    if (settingsSnap.exists()) {
-      cloudSettings = settingsSnap.data() as UnitSettings;
-    }
-
     if (cloudRecords.length > 0) {
       saveAllRecords(cloudRecords);
     } else {
-      // Se a nuvem estiver vazia, sobe os dados locais
-      const localRecords = getAllRecords();
-      for (const r of localRecords) {
-        await setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
+      // Se a nuvem estiver vazia, sobe os dados locais de exemplo para São Manuel
+      if (activeUnit === DEFAULT_SETTINGS.nomeUnidade) {
+        saveAllRecords(INITIAL_SAMPLE_RECORDS);
+        for (const r of INITIAL_SAMPLE_RECORDS) {
+          await setDoc(doc(db, 'objetos_recondicionados', r.id), r).catch(() => {});
+        }
       }
     }
 
-    if (cloudSettings && cloudSettings.nomeUnidade) {
+    // 2. Buscar configurações da unidade ativa no Firestore
+    let cloudSettings: UnitSettings | null = null;
+    const settingsSnap = await getDoc(doc(db, 'configuracoes', activeUnit));
+    if (settingsSnap.exists()) {
+      cloudSettings = settingsSnap.data() as UnitSettings;
       saveSettings(cloudSettings);
     } else {
-      const localSettings = getSettings();
-      await setDoc(doc(db, 'configuracoes', unitId), localSettings).catch(() => {});
+      const localSettings = getSettings(activeUnit);
+      await setDoc(doc(db, 'configuracoes', activeUnit), localSettings).catch(() => {});
     }
 
     return {
-      records: cloudRecords.length > 0 ? cloudRecords : getAllRecords(),
-      settings: cloudSettings || getSettings(),
+      records: getAllRecords(activeUnit),
+      settings: cloudSettings || getSettings(activeUnit),
     };
   } catch (err) {
     return null;
   }
+}
+
+export async function getRegisteredUnits(): Promise<string[]> {
+  const unitsSet = new Set<string>();
+  unitsSet.add('CDD SÃO MANUEL');
+  
+  const allLocal = getRawAllRecords();
+  allLocal.forEach(r => {
+    if (r.unidadeConstatacao && r.unidadeConstatacao.trim()) {
+      unitsSet.add(r.unidadeConstatacao.trim().toUpperCase());
+    }
+  });
+
+  try {
+    const snap = await getDocs(collection(db, 'configuracoes'));
+    snap.forEach(d => {
+      if (d.id && d.id !== 'unidade' && d.id !== 'padrao') {
+        unitsSet.add(d.id.trim().toUpperCase());
+      }
+    });
+  } catch (e) {}
+
+  return Array.from(unitsSet).sort();
 }

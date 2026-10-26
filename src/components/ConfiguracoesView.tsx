@@ -13,7 +13,9 @@ import {
   Network,
   Copy,
   Check,
-  Server
+  Server,
+  Link2,
+  Share2
 } from 'lucide-react';
 import { UnitSettings } from '../types';
 import { 
@@ -23,7 +25,8 @@ import {
   resetToSampleData,
   setSequencialManual,
   DEFAULT_SETTINGS,
-  ServerStatusInfo
+  ServerStatusInfo,
+  getUnitShareUrl
 } from '../services/storage';
 
 interface ConfiguracoesViewProps {
@@ -31,6 +34,7 @@ interface ConfiguracoesViewProps {
   onSettingsUpdated: (newSettings: UnitSettings) => void;
   onDataReset: () => void;
   serverInfo?: ServerStatusInfo | null;
+  onSwitchUnit?: (unitName: string) => void;
 }
 
 export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
@@ -38,11 +42,18 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
   onSettingsUpdated,
   onDataReset,
   serverInfo,
+  onSwitchUnit,
 }) => {
   const [formData, setFormData] = useState<UnitSettings>({ ...settings });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [targetNewUnit, setTargetNewUnit] = useState('');
+
+  // Atualizar formulário quando a unidade mudar
+  React.useEffect(() => {
+    setFormData({ ...settings });
+  }, [settings]);
 
   const handleCopy = (url: string) => {
     navigator.clipboard.writeText(url);
@@ -130,6 +141,81 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
             Configurações salvas com sucesso!
           </div>
         )}
+      </div>
+
+      {/* Card de Link Exclusivo da Unidade para Acesso Direto */}
+      <div className="bg-gradient-to-r from-sky-900 to-[#00416B] text-white rounded-xl shadow-md p-6 space-y-4 border border-sky-700">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-lg bg-yellow-400/20 border border-yellow-400/40 flex items-center justify-center shrink-0">
+              <Link2 className="w-6 h-6 text-yellow-300" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-yellow-300">Acesso Direto Sem Reconfigurar</span>
+              </div>
+              <h2 className="text-lg font-black text-white tracking-tight">
+                Link Exclusivo de {settings.nomeUnidade}
+              </h2>
+              <span className="text-xs text-sky-200">
+                Ao abrir por este link, o sistema já entra automaticamente com o nome, STO e sequencial desta unidade.
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleCopy(getUnitShareUrl(settings.nomeUnidade))}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#FFCC00] hover:bg-yellow-300 text-[#002D56] font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer self-start sm:self-auto shrink-0 active:scale-95"
+          >
+            {copiedUrl === getUnitShareUrl(settings.nomeUnidade) ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-800" />
+                <span>Link Copiado com Sucesso!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                <span>Copiar Link Desta Unidade</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="bg-black/25 rounded-lg p-3 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono">
+          <span className="text-yellow-200 truncate">{getUnitShareUrl(settings.nomeUnidade)}</span>
+          <span className="text-[11px] text-sky-200 shrink-0 font-sans font-medium">Salve nos Favoritos do Chrome ou Edge</span>
+        </div>
+
+        {/* Alternar ou Criar Ambiente para Outra Unidade */}
+        <div className="pt-3 border-t border-sky-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-sky-100">
+            <strong>Deseja gerar link ou acessar outra unidade?</strong>
+            <p className="text-[11px] text-sky-200">Digite o nome da outra unidade (ex: CDD BOTUCATU, AC LENÇÓIS PAULISTA):</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Ex: CDD BOTUCATU"
+              value={targetNewUnit}
+              onChange={(e) => setTargetNewUnit(e.target.value.toUpperCase())}
+              className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-bold border border-slate-300 focus:outline-none focus:ring-2 focus:ring-yellow-400 uppercase"
+            />
+            <button
+              type="button"
+              disabled={!targetNewUnit.trim()}
+              onClick={() => {
+                if (targetNewUnit.trim() && onSwitchUnit) {
+                  onSwitchUnit(targetNewUnit.trim());
+                  setTargetNewUnit('');
+                }
+              }}
+              className="px-3 py-1.5 bg-sky-800 hover:bg-sky-700 disabled:opacity-40 text-white font-bold text-xs rounded-lg border border-sky-600 transition-colors cursor-pointer"
+            >
+              Acessar Unidade
+            </button>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">

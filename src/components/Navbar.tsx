@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Package, ShieldCheck, Clock, MapPin, PlusCircle, Network } from 'lucide-react';
+import { Package, ShieldCheck, Clock, MapPin, PlusCircle, Network, Link2, Check } from 'lucide-react';
 import { UnitSettings } from '../types';
-import { ServerStatusInfo } from '../services/storage';
+import { ServerStatusInfo, getUnitShareUrl } from '../services/storage';
 import { CORREIOS_LOGO_SRC } from '../assets/correiosLogo';
 
 interface NavbarProps {
@@ -10,6 +10,7 @@ interface NavbarProps {
   settings: UnitSettings;
   monthlyCount: number;
   serverInfo?: ServerStatusInfo | null;
+  onSwitchUnit?: (unitName: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -18,8 +19,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   settings,
   monthlyCount,
   serverInfo,
+  onSwitchUnit,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyLink = () => {
+    const url = getUnitShareUrl(settings.nomeUnidade);
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -61,6 +71,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-lg tracking-tight text-white uppercase">CORREIOS</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopyLink();
+                  }}
+                  title="Copiar link exclusivo desta unidade para acessar diretamente sem reconfigurar"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-900/90 hover:bg-sky-800 text-[11px] font-semibold text-yellow-300 border border-yellow-300/40 transition-all shadow-xs cursor-pointer active:scale-95"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-300" />
+                      <span className="text-emerald-300">Link Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-3 h-3 text-yellow-300" />
+                      <span>Copiar Link da Unidade</span>
+                    </>
+                  )}
+                </button>
               </div>
               <div className="flex items-center gap-2 text-xs text-sky-100">
                 <span className="font-semibold text-yellow-300">{settings.nomeUnidade}</span>
