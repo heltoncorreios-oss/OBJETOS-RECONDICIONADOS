@@ -45,6 +45,7 @@
       "type": "object",
       "properties": {
         "nomeUnidade": { "type": "string" },
+        "mcu": { "type": "string" },
         "dr": { "type": "string" },
         "codigoSto": { "type": "string" },
         "cidade": { "type": "string" },

@@ -11,6 +11,7 @@ interface NavbarProps {
   monthlyCount: number;
   serverInfo?: ServerStatusInfo | null;
   onSwitchUnit?: (unitName: string) => void;
+  onOpenMcuModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -20,6 +21,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   monthlyCount,
   serverInfo,
   onSwitchUnit,
+  onOpenMcuModal,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -93,13 +95,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                 </button>
               </div>
-              <div className="flex items-center gap-2 text-xs text-sky-100">
+              <div className="flex items-center gap-2 text-xs text-sky-100 flex-wrap">
                 <span className="font-semibold text-yellow-300">{settings.nomeUnidade}</span>
                 <span>·</span>
                 <span className="flex items-center gap-1 text-sky-200">
                   <MapPin className="w-3 h-3 text-yellow-300" />
-                  STO: {settings.codigoSto} ({settings.dr || settings.uf})
+                  MCU: <strong className="text-white">{settings.mcu || '18650972'}</strong> (STO: {settings.codigoSto})
                 </span>
+                {onOpenMcuModal && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenMcuModal();
+                    }}
+                    title="Alternar de unidade postal ou cadastrar outro MCU"
+                    className="ml-1 px-2 py-0.5 rounded bg-sky-950/70 hover:bg-sky-800 text-[10px] font-bold text-sky-200 hover:text-white border border-sky-400/40 transition-all cursor-pointer shadow-xs active:scale-95"
+                  >
+                    Trocar MCU / Unidade
+                  </button>
+                )}
               </div>
             </div>
           </div>

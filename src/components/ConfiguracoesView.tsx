@@ -35,6 +35,7 @@ interface ConfiguracoesViewProps {
   onDataReset: () => void;
   serverInfo?: ServerStatusInfo | null;
   onSwitchUnit?: (unitName: string) => void;
+  onOpenMcuModal?: () => void;
 }
 
 export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
@@ -43,6 +44,7 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
   onDataReset,
   serverInfo,
   onSwitchUnit,
+  onOpenMcuModal,
 }) => {
   const [formData, setFormData] = useState<UnitSettings>({ ...settings });
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -190,31 +192,19 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
         {/* Alternar ou Criar Ambiente para Outra Unidade */}
         <div className="pt-3 border-t border-sky-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="text-xs text-sky-100">
-            <strong>Deseja gerar link ou acessar outra unidade?</strong>
-            <p className="text-[11px] text-sky-200">Digite o nome da outra unidade (ex: CDD BOTUCATU, AC LENÇÓIS PAULISTA):</p>
+            <strong>Deseja trocar de agência/CDD ou cadastrar nova unidade?</strong>
+            <p className="text-[11px] text-sky-200">Pesquise pelo MCU da unidade ou acesse a lista rápida de unidades cadastradas:</p>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Ex: CDD BOTUCATU"
-              value={targetNewUnit}
-              onChange={(e) => setTargetNewUnit(e.target.value.toUpperCase())}
-              className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-bold border border-slate-300 focus:outline-none focus:ring-2 focus:ring-yellow-400 uppercase"
-            />
+          {onOpenMcuModal && (
             <button
               type="button"
-              disabled={!targetNewUnit.trim()}
-              onClick={() => {
-                if (targetNewUnit.trim() && onSwitchUnit) {
-                  onSwitchUnit(targetNewUnit.trim());
-                  setTargetNewUnit('');
-                }
-              }}
-              className="px-3 py-1.5 bg-sky-800 hover:bg-sky-700 disabled:opacity-40 text-white font-bold text-xs rounded-lg border border-sky-600 transition-colors cursor-pointer"
+              onClick={onOpenMcuModal}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-yellow-400 hover:bg-yellow-300 text-[#002D56] font-bold text-xs rounded-lg transition-all shadow-sm cursor-pointer shrink-0"
             >
-              Acessar Unidade
+              <Building2 className="w-4 h-4 text-[#002D56]" />
+              <span>Consultar / Trocar por MCU</span>
             </button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -222,11 +212,22 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
         
         {/* Bloco 1: Dados Fixos da Unidade */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
-            <Building2 className="w-5 h-5 text-[#00416B]" />
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-tight">
-              1. Dados Fixos da Unidade (Campos em Preto nos Relatórios)
-            </h2>
+          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-[#00416B]" />
+              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-tight">
+                1. Dados Fixos da Unidade (Campos em Preto nos Relatórios)
+              </h2>
+            </div>
+            {onOpenMcuModal && (
+              <button
+                type="button"
+                onClick={onOpenMcuModal}
+                className="text-xs text-[#00416B] hover:text-[#002D56] font-bold underline cursor-pointer"
+              >
+                Trocar MCU
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -246,6 +247,33 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
+                MCU da Unidade (8 dígitos) *
+              </label>
+              <input
+                type="text"
+                value={formData.mcu || ''}
+                onChange={(e) => setFormData({ ...formData, mcu: e.target.value.trim() })}
+                placeholder="Ex: 18650972"
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg font-bold text-emerald-800 bg-emerald-50/50"
+              />
+              <span className="text-[11px] text-slate-500">Identificador único da unidade</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Código STO (com hífen) *
+              </label>
+              <input
+                type="text"
+                value={formData.codigoSto}
+                onChange={(e) => setFormData({ ...formData, codigoSto: e.target.value })}
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg font-bold"
+              />
+              <span className="text-[11px] text-slate-500">Ex: 18650-972</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
                 DR (Diretoria Regional) *
               </label>
               <input
@@ -259,15 +287,26 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Código STO / MCU *
+                Cidade / UF
               </label>
-              <input
-                type="text"
-                value={formData.codigoSto}
-                onChange={(e) => setFormData({ ...formData, codigoSto: e.target.value })}
-                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg font-bold"
-              />
-              <span className="text-[11px] text-slate-500">Ex: 18650-972</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Cidade (ex: SÃO MANUEL)"
+                  value={formData.cidade || ''}
+                  onChange={(e) => setFormData({ ...formData, cidade: e.target.value.toUpperCase() })}
+                  className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg font-bold uppercase"
+                />
+                <input
+                  type="text"
+                  placeholder="UF"
+                  maxLength={2}
+                  value={formData.uf || 'SP'}
+                  onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
+                  className="w-14 px-2 py-2 text-xs border border-slate-300 rounded-lg font-bold uppercase text-center"
+                />
+              </div>
+              <span className="text-[11px] text-slate-500">Ex: SÃO MANUEL / SP</span>
             </div>
 
             <div>

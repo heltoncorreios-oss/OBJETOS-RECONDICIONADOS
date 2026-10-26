@@ -11,6 +11,7 @@ import { TermosListView } from './components/TermosListView';
 import { ConfiguracoesView } from './components/ConfiguracoesView';
 import { PDFPreviewModal } from './components/PDFPreviewModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { McuAccessModal } from './components/McuAccessModal';
 import { ObjetoRecord, UnitSettings } from './types';
 import { 
   getAllRecords, 
@@ -23,7 +24,10 @@ import {
   exportDataToJson,
   getActiveUnitName,
   setActiveUnitName,
-  getUnitShareUrl 
+  getUnitShareUrl,
+  hasActiveSession,
+  clearActiveSession,
+  getActiveMcu
 } from './services/storage';
 import { 
   gerarTermoConstatacaoPDF, 
@@ -40,6 +44,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('controle_mensal');
   const [editingRecord, setEditingRecord] = useState<ObjetoRecord | null>(null);
   const [serverInfo, setServerInfo] = useState<ServerStatusInfo | null>(null);
+  const [isMcuModalOpen, setIsMcuModalOpen] = useState<boolean>(!hasActiveSession());
 
   // Mês e Ano correntes identificados dinamicamente na abertura do sistema
   const now = new Date();
@@ -284,6 +289,7 @@ export default function App() {
         monthlyCount={currentMonthRecords.length}
         serverInfo={serverInfo}
         onSwitchUnit={handleSwitchUnit}
+        onOpenMcuModal={() => setIsMcuModalOpen(true)}
       />
 
       {/* Sub-header Context Banner */}
@@ -353,6 +359,7 @@ export default function App() {
             settings={settings}
             serverInfo={serverInfo}
             onSwitchUnit={handleSwitchUnit}
+            onOpenMcuModal={() => setIsMcuModalOpen(true)}
             onSettingsUpdated={(newSettings) => {
               setActiveUnitName(newSettings.nomeUnidade, true);
               setSettings(newSettings);
@@ -373,12 +380,12 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-bold text-white tracking-wide">CORREIOS</span>
             <span>·</span>
-            <span>CDD São Manuel / SP</span>
+            <span>{settings.nomeUnidade || 'CDD São Manuel'} / {settings.uf || 'SP'}</span>
             <span>·</span>
-            <span>Controle de Objetos Recondicionados e Termos de Constatação</span>
+            <span>MCU: {settings.mcu || '18650972'}</span>
           </div>
           <div className="text-[11px] text-slate-500">
-            Sistema Operacional em Conformidade Normativa
+            Sistema Operacional Multiunidade em Conformidade Normativa
           </div>
         </div>
       </footer>
@@ -407,7 +414,22 @@ export default function App() {
         onConfirm={handleConfirmDelete}
       />
 
-
+      {/* Modal de Acesso e Identificação por MCU */}
+      <McuAccessModal
+        isOpen={isMcuModalOpen}
+        currentSettings={settings}
+        canClose={hasActiveSession()}
+        onClose={() => {
+          if (hasActiveSession()) {
+            setIsMcuModalOpen(false);
+          }
+        }}
+        onUnitSelected={(newSettings) => {
+          setSettings(newSettings);
+          handleSwitchUnit(newSettings.nomeUnidade);
+          setIsMcuModalOpen(false);
+        }}
+      />
 
     </div>
   );

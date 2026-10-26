@@ -134,6 +134,7 @@ export interface HistoricoEmissao {
 export interface UnitSettings {
   // Dados Fixos da Unidade
   nomeUnidade: string; // CDD SÃO MANUEL
+  mcu?: string; // Código MCU da unidade (ex: 18650972 ou 08114904)
   dr: string; // SPI
   codigoSto: string; // 18650-972
   cidade: string; // São Manuel

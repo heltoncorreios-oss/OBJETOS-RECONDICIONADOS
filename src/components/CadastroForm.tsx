@@ -705,20 +705,6 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             />
           )}
         </div>
-
-        {/* AI/TC/CIE do Controle Mensal */}
-        <div className="pt-2 max-w-md">
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Coluna "AI/TC/CIE" do Controle Mensal
-          </label>
-          <input
-            type="text"
-            value={aiTcCie}
-            onChange={(e) => setAiTcCie(e.target.value.toUpperCase())}
-            placeholder="SEQUENCIA DO SISTEMA"
-            className="w-full px-3 py-2 text-xs font-bold text-slate-800 border border-slate-300 rounded-lg"
-          />
-        </div>
       </section>
 
       {/* SEÇÃO 4: PROVIDÊNCIAS */}

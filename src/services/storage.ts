@@ -36,6 +36,7 @@ export const safeStorage = {
 
 export const DEFAULT_SETTINGS: UnitSettings = {
   nomeUnidade: 'CDD SÃO MANUEL',
+  mcu: '18650972',
   dr: 'SPI',
   codigoSto: '18650-972',
   cidade: 'São Manuel',
@@ -219,21 +220,71 @@ export function getActiveUnitName(): string {
   return DEFAULT_SETTINGS.nomeUnidade;
 }
 
-export function setActiveUnitName(unitName: string, updateUrl = true): void {
-  const clean = unitName.trim().toUpperCase();
-  safeStorage.setItem('cdd_active_unit', clean);
-  if (updateUrl && typeof window !== 'undefined') {
+export function getActiveMcu(): string | null {
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const mcuParam = params.get('mcu') || params.get('codigo');
+    if (mcuParam && mcuParam.trim()) {
+      return mcuParam.trim().replace(/[^0-9A-Za-z]/g, '');
+    }
+  }
+  return safeStorage.getItem('cdd_active_mcu');
+}
+
+export function setActiveMcu(mcu: string): void {
+  const clean = mcu.trim().replace(/[^0-9A-Za-z]/g, '');
+  safeStorage.setItem('cdd_active_mcu', clean);
+}
+
+export function hasActiveSession(): boolean {
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mcu') || params.get('unidade') || params.get('u')) {
+      return true;
+    }
+  }
+  const activeUnit = safeStorage.getItem('cdd_active_unit');
+  const activeMcu = safeStorage.getItem('cdd_active_mcu');
+  return !!(activeUnit || activeMcu);
+}
+
+export function clearActiveSession(): void {
+  safeStorage.removeItem('cdd_active_unit');
+  safeStorage.removeItem('cdd_active_mcu');
+  if (typeof window !== 'undefined') {
     const url = new URL(window.location.href);
-    url.searchParams.set('unidade', clean);
+    url.searchParams.delete('unidade');
+    url.searchParams.delete('u');
+    url.searchParams.delete('mcu');
+    url.searchParams.delete('codigo');
     window.history.replaceState({}, '', url.toString());
   }
 }
 
-export function getUnitShareUrl(unitName?: string): string {
+export function setActiveUnitName(unitName: string, updateUrl = true, mcu?: string): void {
+  const clean = unitName.trim().toUpperCase();
+  safeStorage.setItem('cdd_active_unit', clean);
+  if (mcu) {
+    setActiveMcu(mcu);
+  }
+  if (updateUrl && typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    url.searchParams.set('unidade', clean);
+    if (mcu) {
+      url.searchParams.set('mcu', mcu.trim());
+    }
+    window.history.replaceState({}, '', url.toString());
+  }
+}
+
+export function getUnitShareUrl(unitName?: string, mcu?: string): string {
   const unit = (unitName || getActiveUnitName()).trim().toUpperCase();
   if (typeof window !== 'undefined') {
     const url = new URL(window.location.href);
     url.searchParams.set('unidade', unit);
+    if (mcu) {
+      url.searchParams.set('mcu', mcu);
+    }
     return url.toString();
   }
   return `?unidade=${encodeURIComponent(unit)}`;
@@ -241,6 +292,60 @@ export function getUnitShareUrl(unitName?: string): string {
 
 export function getUnitSettingsKey(unitName: string): string {
   return `cdd_settings_${unitName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+}
+
+export async function findUnitByMcu(mcuInput: string): Promise<UnitSettings | null> {
+  const clean = mcuInput.trim().replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  if (!clean) return null;
+
+  // 1. Verificar se coincide com CDD São Manuel
+  const defaultMcuClean = (DEFAULT_SETTINGS.mcu || '18650972').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  const defaultStoClean = DEFAULT_SETTINGS.codigoSto.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  if (clean === defaultMcuClean || clean === defaultStoClean || clean === DEFAULT_SETTINGS.nomeUnidade.toUpperCase()) {
+    return getSettings(DEFAULT_SETTINGS.nomeUnidade);
+  }
+
+  // 2. Buscar no Firestore
+  try {
+    const querySnapshot = await getDocs(collection(db, 'configuracoes'));
+    let foundFirestore: UnitSettings | null = null;
+
+    querySnapshot.forEach(d => {
+      if (foundFirestore) return;
+      const data = d.data() as UnitSettings;
+      const dMcu = (data.mcu || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+      const dSto = (data.codigoSto || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+      const dName = (data.nomeUnidade || '').trim().toUpperCase();
+      if (dMcu === clean || dSto === clean || dName === clean || d.id.toUpperCase() === clean) {
+        foundFirestore = data;
+      }
+    });
+
+    if (foundFirestore) {
+      return foundFirestore;
+    }
+  } catch (err) {}
+
+  return null;
+}
+
+export async function getAllRegisteredUnitsList(): Promise<UnitSettings[]> {
+  const unitsMap = new Map<string, UnitSettings>();
+
+  // Unidade CDD São Manuel sempre disponível
+  unitsMap.set(DEFAULT_SETTINGS.nomeUnidade, DEFAULT_SETTINGS);
+
+  try {
+    const querySnapshot = await getDocs(collection(db, 'configuracoes'));
+    querySnapshot.forEach(d => {
+      const data = d.data() as UnitSettings;
+      if (data && data.nomeUnidade && d.id !== 'unidade' && d.id !== 'padrao') {
+        unitsMap.set(data.nomeUnidade.trim().toUpperCase(), data);
+      }
+    });
+  } catch (err) {}
+
+  return Array.from(unitsMap.values());
 }
 
 // ==========================================
