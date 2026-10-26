@@ -44,7 +44,10 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('controle_mensal');
   const [editingRecord, setEditingRecord] = useState<ObjetoRecord | null>(null);
   const [serverInfo, setServerInfo] = useState<ServerStatusInfo | null>(null);
-  const [isMcuModalOpen, setIsMcuModalOpen] = useState<boolean>(!hasActiveSession());
+  
+  // Abre o pop-up pedindo o MCU logo na abertura do sistema (exceto se a URL já trouxer ?mcu=...)
+  const hasDirectMcu = typeof window !== 'undefined' && !!(new URLSearchParams(window.location.search).get('mcu'));
+  const [isMcuModalOpen, setIsMcuModalOpen] = useState<boolean>(!hasDirectMcu);
 
   // Mês e Ano correntes identificados dinamicamente na abertura do sistema
   const now = new Date();
@@ -80,10 +83,7 @@ export default function App() {
 
   // Carregar dados e sincronizar com o Servidor Local Central
   useEffect(() => {
-    // Sincronizar parâmetro da URL
     const activeUnit = getActiveUnitName();
-    setActiveUnitName(activeUnit, true);
-
     refreshData(activeUnit);
 
     const doSync = () => {
@@ -414,16 +414,12 @@ export default function App() {
         onConfirm={handleConfirmDelete}
       />
 
-      {/* Modal de Acesso e Identificação por MCU */}
+      {/* Modal de Acesso e Identificação por MCU (Pop-up ao abrir o link) */}
       <McuAccessModal
         isOpen={isMcuModalOpen}
         currentSettings={settings}
-        canClose={hasActiveSession()}
-        onClose={() => {
-          if (hasActiveSession()) {
-            setIsMcuModalOpen(false);
-          }
-        }}
+        canClose={true}
+        onClose={() => setIsMcuModalOpen(false)}
         onUnitSelected={(newSettings) => {
           setSettings(newSettings);
           handleSwitchUnit(newSettings.nomeUnidade);

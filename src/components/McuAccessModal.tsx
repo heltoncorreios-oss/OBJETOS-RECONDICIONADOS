@@ -242,10 +242,49 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
                     )}
                   </button>
                 </div>
-                <span className="text-[11px] text-slate-500 block">
-                  Dica: Para o CDD São Manuel, o MCU padrão cadastrado é <strong>18650972</strong>.
-                </span>
+                
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2">
+                  <span className="text-[11px] text-slate-500">
+                    Dica: Para o CDD São Manuel, o MCU é <strong>18650972</strong>.
+                  </span>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUnitForm(prev => ({
+                        ...prev,
+                        mcu: mcuInput.trim(),
+                        codigoSto: mcuInput.trim().length === 8 ? `${mcuInput.trim().slice(0, 5)}-${mcuInput.trim().slice(5)}` : mcuInput.trim(),
+                      }));
+                      setStep('register');
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 text-xs text-[#00416B] font-bold hover:underline cursor-pointer py-1"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>Cadastrar Nova Unidade / Agência</span>
+                  </button>
+                </div>
               </form>
+
+              {/* Botão de Atalho Rápido para a Unidade Atual */}
+              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="text-xs">
+                  <span className="font-bold text-amber-900 block">Ambiente Ativo:</span>
+                  <span className="text-amber-800 font-medium">
+                    {currentSettings.nomeUnidade} {currentSettings.mcu ? `(MCU: ${currentSettings.mcu})` : ''}
+                  </span>
+                </div>
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#00416B] hover:bg-[#002D56] text-white text-xs font-bold rounded-lg shadow-xs transition-all cursor-pointer shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5 text-yellow-300" />
+                    <span>Entrar no Sistema</span>
+                  </button>
+                )}
+              </div>
 
               {/* Lista de Unidades Já Cadastradas */}
               {registeredUnits.length > 0 && (
