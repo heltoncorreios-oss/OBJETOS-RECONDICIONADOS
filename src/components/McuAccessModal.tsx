@@ -107,7 +107,7 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
         setNewUnitForm(prev => ({
           ...prev,
           mcu: clean,
-          codigoSto: clean.length === 8 ? `${clean.slice(0, 5)}-${clean.slice(5)}` : clean,
+          codigoSto: clean,
         }));
         setStep('register');
       }
@@ -220,7 +220,7 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
                     <Hash className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Ex: 18650972 ou 08114904"
+                      placeholder="Ex: 00437351"
                       value={mcuInput}
                       onChange={(e) => setMcuInput(e.target.value)}
                       autoFocus
@@ -245,7 +245,7 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2">
                   <span className="text-[11px] text-slate-500">
-                    Dica: Para o CDD São Manuel, o MCU é <strong>18650972</strong>.
+                    Dica: Exemplo de MCU: <strong>00437351</strong> (ou <strong>18650972</strong> para o CDD São Manuel).
                   </span>
                   
                   <button
@@ -254,7 +254,7 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
                       setNewUnitForm(prev => ({
                         ...prev,
                         mcu: mcuInput.trim(),
-                        codigoSto: mcuInput.trim().length === 8 ? `${mcuInput.trim().slice(0, 5)}-${mcuInput.trim().slice(5)}` : mcuInput.trim(),
+                        codigoSto: mcuInput.trim(),
                       }));
                       setStep('register');
                     }}
@@ -355,10 +355,12 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
                   <input
                     type="text"
                     required
+                    placeholder="Ex: 00437351"
                     value={newUnitForm.mcu}
-                    onChange={(e) => setNewUnitForm(prev => ({ ...prev, mcu: e.target.value }))}
+                    onChange={(e) => setNewUnitForm(prev => ({ ...prev, mcu: e.target.value.trim() }))}
                     className="w-full px-3 py-2 text-xs font-bold text-slate-900 border border-slate-300 rounded-lg"
                   />
+                  <span className="text-[11px] text-slate-500">Exemplo: 00437351</span>
                 </div>
 
                 <div>
@@ -377,16 +379,17 @@ export const McuAccessModal: React.FC<McuAccessModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Código STO / CEP da Unidade *
+                    Código STO da Unidade *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ex: 18600-000"
+                    placeholder="Ex: 00437351 ou 18650972"
                     value={newUnitForm.codigoSto}
-                    onChange={(e) => setNewUnitForm(prev => ({ ...prev, codigoSto: e.target.value }))}
+                    onChange={(e) => setNewUnitForm(prev => ({ ...prev, codigoSto: e.target.value.trim() }))}
                     className="w-full px-3 py-2 text-xs font-bold text-slate-900 border border-slate-300 rounded-lg"
                   />
+                  <span className="text-[11px] text-slate-500">Sem obrigação de hífen (com ou sem hífen)</span>
                 </div>
 
                 <div>
