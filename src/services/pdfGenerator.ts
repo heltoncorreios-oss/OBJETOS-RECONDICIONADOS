@@ -693,7 +693,17 @@ export function gerarTermoConstatacaoPDF(
     format: 'a4',
   });
 
+  // Copia 1
   renderTermoPage(doc, registro, settings);
+  
+  // Copia 2
+  doc.addPage();
+  renderTermoPage(doc, registro, settings);
+  
+  // Copia 3
+  doc.addPage();
+  renderTermoPage(doc, registro, settings);
+  
   return doc;
 }
 

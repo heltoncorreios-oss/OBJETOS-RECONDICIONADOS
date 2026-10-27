@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { ObjetoRecord, UnitSettings } from '../types';
 import { MESES_POR_EXTENSO, gerarControleMensalPDF, gerarLoteTermosPDF, downloadPDF } from '../services/pdfGenerator';
-import { logControleMensalEmissao } from '../services/storage';
+import { logControleMensalEmissao, deleteRecordsByMonth } from '../services/storage';
 import { CORREIOS_LOGO_SRC } from '../assets/correiosLogo';
 
 interface ControleMensalViewProps {
@@ -254,6 +254,21 @@ export const ControleMensalView: React.FC<ControleMensalViewProps> = ({
             >
               <Layers className="w-4 h-4 text-emerald-400" />
               <span>Baixar Lote Termos ({sortedRecords.length})</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                if (window.confirm(`Deseja FINALIZAR o mês de ${MESES_POR_EXTENSO[selectedMonth - 1]} / ${selectedYear}? Isso imprimirá o controle, salvará os PDFs e APAGARÁ os registros deste mês do banco.`)) {
+                  handleGerarPdfControle(true); // Imprime controle
+                  deleteRecordsByMonth(selectedYear, selectedMonth, settings.nomeUnidade);
+                  window.location.reload(); // Recarrega para limpar o estado
+                }
+              }}
+              disabled={sortedRecords.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer transition-transform active:scale-95"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Finalizar Mês</span>
             </button>
           </div>
 

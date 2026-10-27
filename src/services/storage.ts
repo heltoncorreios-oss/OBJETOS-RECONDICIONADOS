@@ -645,6 +645,25 @@ export function deleteRecord(id: string): boolean {
   return true;
 }
 
+export function deleteRecordsByMonth(ano: number, mes: number, targetUnit: string): void {
+  const allRecords = getRawAllRecords();
+  const recordsToKeep = allRecords.filter(r => 
+    !(r.anoReferencia === ano && r.mesReferencia === mes && r.unidadeConstatacao === targetUnit)
+  );
+  saveAllRecords(recordsToKeep);
+
+  // Note: Batch delete on Firestore would be more efficient, but we keep it simple for now
+  const recordsToDelete = allRecords.filter(r => 
+    r.anoReferencia === ano && r.mesReferencia === mes && r.unidadeConstatacao === targetUnit
+  );
+  
+  for (const rec of recordsToDelete) {
+    try {
+      deleteDoc(doc(db, 'objetos_recondicionados', rec.id)).catch(() => {});
+    } catch (e) {}
+  }
+}
+
 export function exportDataToJson(targetUnit?: string): string {
   const unit = targetUnit || getActiveUnitName();
   const data = {
