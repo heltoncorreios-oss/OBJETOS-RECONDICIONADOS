@@ -43,7 +43,7 @@ function testManifestAndOrigins() {
   assert.ok(!serialized.includes('*.vercel.app'), 'Não pode conter wildcard *.vercel.app');
   assert.ok(!serialized.includes('<all_urls>'), 'Não pode conter <all_urls>');
 
-  assert.equal(manifest.content_scripts.length, 2);
+  assert.equal(manifest.content_scripts.length, 3);
   assert.deepEqual(manifest.content_scripts[0].matches, [
     'https://recondicionamentodeobjetos.vercel.app/*',
   ]);
@@ -52,6 +52,11 @@ function testManifestAndOrigins() {
     'https://srointranet.correios.com.br/*',
   ]);
   assert.equal(manifest.content_scripts[1].all_frames, false);
+  assert.deepEqual(manifest.content_scripts[2].matches, [
+    'https://srointranet.correios.com.br/*',
+  ]);
+  assert.equal(manifest.content_scripts[2].all_frames, false);
+  assert.equal(manifest.content_scripts[2].world, 'MAIN');
 }
 
 function testParserRules() {
@@ -198,6 +203,35 @@ function testParserRules() {
   assert.equal(parsedColonTd.data?.destinatarioNome, 'PESSOA DESTINATARIA');
   assert.equal(parsedColonTd.data?.cepDestinatario, '18650065');
   assert.equal(parsedColonTd.data?.numeroDestinatario, '792');
+
+  // Regressão: layout exato da tela real "AE139312695BR - Postagem (PO)" do SRO Intranet
+  const realSroPoHtml = `
+    <table>
+      <tr><th colspan="2">AE139312695BR - Postagem (PO)</th></tr>
+      <tr><td>Usuário / Estação:</td><td>00000299 / 299</td></tr>
+      <tr><td>Transmitido por:</td><td>70707096 / Interface Correios Atende</td></tr>
+      <tr><td>Unidade:</td><td>04035971 / AGF SANTA CRUZ</td></tr>
+      <tr><td>Município:</td><td>SAO PAULO / SP</td></tr>
+      <tr><td>Criado em:</td><td>11/11/2026 17:51:40</td></tr>
+      <tr><td>CEP Destinatário:</td><td>18652442 &nbsp; Destinatário: MARINALVA CRISTINA CRESPILHO TARZONI</td></tr>
+      <tr><td>Número Logradouro:</td><td>100</td></tr>
+      <tr><td>CEP Remetente:</td><td>04041000 &nbsp; Remetente: PHARMACOM SOLUCOES PHARMACEUTICAS</td></tr>
+      <tr><td>Número Logradouro:</td><td>134</td></tr>
+      <tr><td>AR:</td><td>N &nbsp; TIPO: Sem AR &nbsp; MP: N &nbsp; VD: S &nbsp; EE: N &nbsp; EV: N</td></tr>
+      <tr><td>Código de Serviço:</td><td>03220 - SEDEX CONTRATO AG &nbsp; Peso: 2,580 kg</td></tr>
+    </table>
+  `;
+  const parsedRealPo = parseSroContent(realSroPoHtml, 'AE139312695BR');
+  assert.equal(parsedRealPo.ok, true);
+  assert.equal(parsedRealPo.data?.unidadePostagem, '04035971 / AGF SANTA CRUZ');
+  assert.equal(parsedRealPo.data?.cepDestinatario, '18652442');
+  assert.equal(parsedRealPo.data?.destinatarioNome, 'MARINALVA CRISTINA CRESPILHO TARZONI');
+  assert.equal(parsedRealPo.data?.numeroDestinatario, '100');
+  assert.equal(parsedRealPo.data?.cepRemetente, '04041000');
+  assert.equal(parsedRealPo.data?.remetenteNome, 'PHARMACOM SOLUCOES PHARMACEUTICAS');
+  assert.equal(parsedRealPo.data?.numeroRemetente, '134');
+  assert.equal(parsedRealPo.data?.valorDeclarado, 'SIM');
+  assert.equal(parsedRealPo.data?.pesoGramas, 2580);
 }
 
 function testExtensionCommunicationValidation() {

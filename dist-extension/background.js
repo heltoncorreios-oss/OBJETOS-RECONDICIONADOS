@@ -325,11 +325,24 @@ function parseSroContent(rawInput, expectedTrackingCode) {
     /Unidade(?:\s+(?:de\s+Postagem|Origem))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
     /Local(?:\s+de\s+Postagem)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
   ]).toUpperCase();
-  const remetenteNome = (extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
-  ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [
-    /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
-  ]) : "")).toUpperCase();
+  const extractPersonName = (role, block) => {
+    const labelPattern = role === "Remetente" ? /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+/gi : /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+/gi;
+    for (const match of poSection.matchAll(labelPattern)) {
+      const idx = match.index ?? 0;
+      const prefix = poSection.slice(Math.max(0, idx - 32), idx);
+      if (/(?:CEP|N[úu]mero(?:\s+Logradouro)?)(?:\s+do)?\s*$/i.test(prefix)) {
+        continue;
+      }
+      const after = poSection.slice(idx + match[0].length);
+      const valMatch = after.match(/^([^\n|;]+)/);
+      const val = cleanFieldValue(valMatch?.[1]);
+      if (val) return val;
+    }
+    return extractFirstMatch(block, [
+      /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
+    ]);
+  };
+  const remetenteNome = (remIndex >= 0 ? extractPersonName("Remetente", remBlock) : "").toUpperCase();
   const rawCepRem = extractFirstMatch(poSection, [
     /CEP\s+(?:do\s+)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i
   ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i]) : "");
@@ -341,11 +354,7 @@ function parseSroContent(rawInput, expectedTrackingCode) {
     /N[úu]mero[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
     /(?:N[º°]|Nro|Nr\.?)[ \t]*(?:[:=|]+[ \t]*)*([^\n,;|]+)/i
   ]) : "");
-  const destinatarioNome = (extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
-  ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [
-    /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
-  ]) : "")).toUpperCase();
+  const destinatarioNome = (destIndex >= 0 ? extractPersonName("Destinat\xE1rio", destBlock) : "").toUpperCase();
   const rawCepDest = extractFirstMatch(poSection, [
     /CEP\s+(?:do\s+)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i
   ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i]) : "");

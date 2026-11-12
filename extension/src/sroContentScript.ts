@@ -240,6 +240,28 @@ function findSearchButton(input: TrackingInputElement | null): HTMLElement | nul
   return null;
 }
 
+const MAIN_CLICK_EVENT_NAME = '__SRO_EXT_TRIGGER_CLICK__';
+const MAIN_CLICK_TARGET_ATTR = 'data-sro-ext-click-target';
+
+function triggerMainWorldClick(el: HTMLElement): void {
+  for (const doc of getAccessibleDocuments()) {
+    doc.querySelectorAll(`[${MAIN_CLICK_TARGET_ATTR}="1"]`).forEach((prev) => {
+      prev.removeAttribute(MAIN_CLICK_TARGET_ATTR);
+    });
+  }
+  el.setAttribute(MAIN_CLICK_TARGET_ATTR, '1');
+  window.dispatchEvent(new CustomEvent(MAIN_CLICK_EVENT_NAME));
+
+  // Fallback seguro apenas quando não é URL javascript: caso o helper MAIN ainda não tenha respondido
+  if (el.getAttribute(MAIN_CLICK_TARGET_ATTR) === '1') {
+    el.removeAttribute(MAIN_CLICK_TARGET_ATTR);
+    const href = (el.getAttribute('href') || '').trim().toLowerCase();
+    if (!href.startsWith('javascript:')) {
+      el.click();
+    }
+  }
+}
+
 function triggerInputAndSearch(trackingCode: string): {
   inputFound: boolean;
   searchTriggered: boolean;
@@ -266,7 +288,7 @@ function triggerInputAndSearch(trackingCode: string): {
 
   const button = findSearchButton(input);
   if (button) {
-    button.click();
+    triggerMainWorldClick(button);
     return { inputFound: true, searchTriggered: true };
   }
 
@@ -572,7 +594,7 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
     const postadoTrigger = findPostadoTrigger();
     if (postadoTrigger) {
       postadoRowFound = true;
-      postadoTrigger.click();
+      triggerMainWorldClick(postadoTrigger);
       postadoDetailTriggered = true;
       await waitForPoDetailDom(4000);
       combined = collectCombinedContent();

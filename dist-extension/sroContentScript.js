@@ -170,6 +170,24 @@
     }
     return null;
   }
+  var MAIN_CLICK_EVENT_NAME = "__SRO_EXT_TRIGGER_CLICK__";
+  var MAIN_CLICK_TARGET_ATTR = "data-sro-ext-click-target";
+  function triggerMainWorldClick(el) {
+    for (const doc of getAccessibleDocuments()) {
+      doc.querySelectorAll(`[${MAIN_CLICK_TARGET_ATTR}="1"]`).forEach((prev) => {
+        prev.removeAttribute(MAIN_CLICK_TARGET_ATTR);
+      });
+    }
+    el.setAttribute(MAIN_CLICK_TARGET_ATTR, "1");
+    window.dispatchEvent(new CustomEvent(MAIN_CLICK_EVENT_NAME));
+    if (el.getAttribute(MAIN_CLICK_TARGET_ATTR) === "1") {
+      el.removeAttribute(MAIN_CLICK_TARGET_ATTR);
+      const href = (el.getAttribute("href") || "").trim().toLowerCase();
+      if (!href.startsWith("javascript:")) {
+        el.click();
+      }
+    }
+  }
   function triggerInputAndSearch(trackingCode) {
     const input = findTrackingInput();
     if (!input) {
@@ -187,7 +205,7 @@
     input.dispatchEvent(new Event("change", { bubbles: true }));
     const button = findSearchButton(input);
     if (button) {
-      button.click();
+      triggerMainWorldClick(button);
       return { inputFound: true, searchTriggered: true };
     }
     const form = input.closest("form");
@@ -425,7 +443,7 @@
       const postadoTrigger = findPostadoTrigger();
       if (postadoTrigger) {
         postadoRowFound = true;
-        postadoTrigger.click();
+        triggerMainWorldClick(postadoTrigger);
         postadoDetailTriggered = true;
         await waitForPoDetailDom(4e3);
         combined = collectCombinedContent();

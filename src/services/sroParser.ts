@@ -471,17 +471,31 @@ export function parseSroContent(
     /Local(?:\s+de\s+Postagem)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
   ]).toUpperCase();
 
+  const extractPersonName = (role: 'Remetente' | 'Destinatário', block: string): string => {
+    const labelPattern =
+      role === 'Remetente'
+        ? /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+/gi
+        : /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+/gi;
+
+    for (const match of poSection.matchAll(labelPattern)) {
+      const idx = match.index ?? 0;
+      const prefix = poSection.slice(Math.max(0, idx - 32), idx);
+      if (/(?:CEP|N[úu]mero(?:\s+Logradouro)?)(?:\s+do)?\s*$/i.test(prefix)) {
+        continue;
+      }
+      const after = poSection.slice(idx + match[0].length);
+      const valMatch = after.match(/^([^\n|;]+)/);
+      const val = cleanFieldValue(valMatch?.[1]);
+      if (val) return val;
+    }
+
+    return extractFirstMatch(block, [
+      /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+    ]);
+  };
+
   // 4. Remetente
-  const remetenteNome = (
-    extractFirstMatch(poSection, [
-      /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
-    ]) ||
-    (remIndex >= 0
-      ? extractFirstMatch(remBlock, [
-          /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
-        ])
-      : '')
-  ).toUpperCase();
+  const remetenteNome = (remIndex >= 0 ? extractPersonName('Remetente', remBlock) : '').toUpperCase();
 
   const rawCepRem =
     extractFirstMatch(poSection, [
@@ -505,16 +519,7 @@ export function parseSroContent(
       : '');
 
   // 5. Destinatário
-  const destinatarioNome = (
-    extractFirstMatch(poSection, [
-      /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
-    ]) ||
-    (destIndex >= 0
-      ? extractFirstMatch(destBlock, [
-          /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
-        ])
-      : '')
-  ).toUpperCase();
+  const destinatarioNome = (destIndex >= 0 ? extractPersonName('Destinatário', destBlock) : '').toUpperCase();
 
   const rawCepDest =
     extractFirstMatch(poSection, [
