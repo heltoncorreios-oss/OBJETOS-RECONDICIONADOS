@@ -193,7 +193,10 @@ async function waitForTabReady(
         return;
       }
 
-      if (changeInfo.status === 'complete') {
+      if (
+        changeInfo.status === 'complete' &&
+        currentUrl?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
+      ) {
         finish({ ready: true, redirectedToAuth: false, finalUrl: currentUrl });
       }
     };

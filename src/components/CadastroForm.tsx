@@ -195,13 +195,13 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
       applied.add('pesoPostalGramas');
     }
 
-    if (!manualFieldsRef.current.has('valorDeclaradoTexto')) {
+    if (!manualFieldsRef.current.has('valorDeclaradoTexto') && data.valorDeclarado) {
       setValorDeclaradoTexto(data.valorDeclarado);
       applied.add('valorDeclaradoTexto');
     }
 
-    if (!manualFieldsRef.current.has('unidadeDestinoCodigo')) {
-      setUnidadeDestinoCodigo(data.destinoCep || '');
+    if (!manualFieldsRef.current.has('unidadeDestinoCodigo') && data.destinoCep) {
+      setUnidadeDestinoCodigo(data.destinoCep);
       applied.add('unidadeDestinoCodigo');
     }
 

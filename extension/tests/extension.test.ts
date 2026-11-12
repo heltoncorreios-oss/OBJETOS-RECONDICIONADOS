@@ -156,6 +156,48 @@ function testParserRules() {
   assert.equal(parsedPostadoDet.data?.numeroRemetente, '134');
   assert.equal(parsedPostadoDet.data?.cepDestinatario, '18650065');
   assert.equal(parsedPostadoDet.data?.numeroDestinatario, '792');
+
+  // Regressão: tabela resumida apenas com a linha "Postado" sem detalhes de PO NÃO pode retornar ok:true vazio
+  const summaryOnlyHtml = `
+    <div>AE139312695BR (SEDEX) 12/11/2026 17:23:14</div>
+    <table>
+      <tr><th>Det</th><th>Data Hora</th><th>Local</th><th>Situação</th><th>Nº evt</th></tr>
+      <tr><td>Det</td><td>11/11/2026 17:51:40</td><td>AGF SANTA CRUZ - SAO PAULO / SP</td><td>Postado</td><td>1</td></tr>
+    </table>
+  `;
+  const parsedSummaryOnly = parseSroContent(summaryOnlyHtml, 'AE139312695BR');
+  assert.equal(parsedSummaryOnly.ok, false);
+  assert.equal(parsedSummaryOnly.errorCode, 'PO_EVENT_NOT_FOUND');
+
+  // Regressão: HTML com <td>Peso:</td><td>...</td> e seção Remetente/Destinatário com "Nome:"
+  const colonInTdHtml = `
+    <div>Objeto: AE139312695BR</div>
+    <table>
+      <tr><th colspan="2">Situação: Postado</th></tr>
+      <tr><td><b>Peso:</b></td><td>2,580 kg</td></tr>
+      <tr><td><b>VD:</b></td><td>S</td></tr>
+      <tr><td><b>Unidade:</b></td><td>AGF SANTA CRUZ</td></tr>
+      <tr><td colspan="2"><b>Remetente</b></td></tr>
+      <tr><td>Nome:</td><td>EMPRESA REMETENTE</td></tr>
+      <tr><td>CEP:</td><td>04041-000</td></tr>
+      <tr><td>Número:</td><td>134</td></tr>
+      <tr><td colspan="2"><b>Destinatário</b></td></tr>
+      <tr><td>Nome:</td><td>PESSOA DESTINATARIA</td></tr>
+      <tr><td>CEP:</td><td>18650-065</td></tr>
+      <tr><td>Número:</td><td>792</td></tr>
+    </table>
+  `;
+  const parsedColonTd = parseSroContent(colonInTdHtml, 'AE139312695BR');
+  assert.equal(parsedColonTd.ok, true);
+  assert.equal(parsedColonTd.data?.pesoGramas, 2580);
+  assert.equal(parsedColonTd.data?.valorDeclarado, 'SIM');
+  assert.equal(parsedColonTd.data?.unidadePostagem, 'AGF SANTA CRUZ');
+  assert.equal(parsedColonTd.data?.remetenteNome, 'EMPRESA REMETENTE');
+  assert.equal(parsedColonTd.data?.cepRemetente, '04041000');
+  assert.equal(parsedColonTd.data?.numeroRemetente, '134');
+  assert.equal(parsedColonTd.data?.destinatarioNome, 'PESSOA DESTINATARIA');
+  assert.equal(parsedColonTd.data?.cepDestinatario, '18650065');
+  assert.equal(parsedColonTd.data?.numeroDestinatario, '792');
 }
 
 function testExtensionCommunicationValidation() {

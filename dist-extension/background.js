@@ -109,7 +109,7 @@ function htmlToReadableText(raw) {
   let text = raw.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
   text = text.replace(/\splaceholder=["'][^"']*["']/gi, " ");
   text = text.replace(/<input[^>]*value=["']([^"']*)["'][^>]*>/gi, " $1 ");
-  text = text.replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, "\n").replace(/<(td|th)\b[^>]*>/gi, " ").replace(/<\/th>/gi, ": ").replace(/<\/td>/gi, " | ").replace(/<[^>]+>/g, " ");
+  text = text.replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, "\n").replace(/<(td|th)\b[^>]*>/gi, " ").replace(/<\/(td|th)>/gi, " | ").replace(/<[^>]+>/g, " ");
   text = decodeHtmlEntities(text);
   return text.replace(/[ \t]+/g, " ").replace(/\r\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -159,7 +159,7 @@ function isolatePostagemSection(fullText) {
     if (hasPoDetailSignals(candidateText)) {
       return candidateText;
     }
-    if (!bestBlock) {
+    if (!bestBlock && /\b(?:Peso|VD|Valor\s+Declarado|CEP|Remetente|Destinat[áa]rio)\b/i.test(candidateText)) {
       bestBlock = candidateText;
     }
   }
@@ -311,48 +311,60 @@ function parseSroContent(rawInput, expectedTrackingCode) {
     destBlock = poSection.slice(destIndex);
   }
   const rawPeso = extractFirstMatch(poSection, [
-    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
     /\b(\d+[.,]\d{1,3}\s*kg)\b/i,
     /\b(\d+\s*(?:g|gs))\b/i
   ]);
   const pesoGramas = parseWeightToGrams(rawPeso);
   const rawVd = extractFirstMatch(poSection, [
-    /(?:Indicador\s+)?VD\s*[:=|]\s*([A-Za-zÃã]+)\b/i,
-    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([^\n|;]+)/i
+    /(?:Indicador\s+)?VD[ \t]*(?:[:=|]+[ \t]*)+([A-Za-zÃã]+)\b/i,
+    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
   ]);
   const valorDeclarado = parseValorDeclarado(rawVd);
   const unidadePostagem = extractFirstMatch(poSection, [
-    /Unidade(?:\s+(?:de\s+Postagem|Origem))?\s*[:=|]\s*([^\n|;]+)/i,
-    /Local(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i
+    /Unidade(?:\s+(?:de\s+Postagem|Origem))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+    /Local(?:\s+de\s+Postagem)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
   ]).toUpperCase();
-  const remetenteNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Remetente\s*[:=|]\s*([^\n|;]+)/i
-  ]).toUpperCase();
+  const remetenteNome = (extractFirstMatch(poSection, [
+    /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
+  ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [
+    /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
+  ]) : "")).toUpperCase();
   const rawCepRem = extractFirstMatch(poSection, [
-    /CEP\s+(?:do\s+)?Remetente\s*[:=|]\s*([0-9.\-]+)/i
-  ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [/CEP\s*[:=|]\s*([0-9.\-]+)/i]) : "");
+    /CEP\s+(?:do\s+)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i
+  ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i]) : "");
   const cepRemetente = normalizeCepDigits(rawCepRem);
   const numeroRemetente = extractFirstMatch(poSection, [
-    /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Remetente\s*[:=|]\s*([^\n,;|]+)/i
+    /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i
   ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [
-    /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
-    /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-    /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i
+    /N[úu]mero\s+Logradouro[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+    /N[úu]mero[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+    /(?:N[º°]|Nro|Nr\.?)[ \t]*(?:[:=|]+[ \t]*)*([^\n,;|]+)/i
   ]) : "");
-  const destinatarioNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i
-  ]).toUpperCase();
+  const destinatarioNome = (extractFirstMatch(poSection, [
+    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
+  ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [
+    /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i
+  ]) : "")).toUpperCase();
   const rawCepDest = extractFirstMatch(poSection, [
-    /CEP\s+(?:do\s+)?Destinat[áa]rio\s*[:=|]\s*([0-9.\-]+)/i
-  ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [/CEP\s*[:=|]\s*([0-9.\-]+)/i]) : "");
+    /CEP\s+(?:do\s+)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i
+  ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i]) : "");
   const cepDestinatario = normalizeCepDigits(rawCepDest);
   const numeroDestinatario = extractFirstMatch(poSection, [
-    /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Destinat[áa]rio\s*[:=|]\s*([^\n,;|]+)/i
+    /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i
   ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [
-    /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
-    /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-    /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i
+    /N[úu]mero\s+Logradouro[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+    /N[úu]mero[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+    /(?:N[º°]|Nro|Nr\.?)[ \t]*(?:[:=|]+[ \t]*)*([^\n,;|]+)/i
   ]) : "");
+  const hasAnyPoData = pesoGramas !== null || Boolean(valorDeclarado) || Boolean(cepRemetente) || Boolean(cepDestinatario) || Boolean(remetenteNome) || Boolean(destinatarioNome);
+  if (!hasAnyPoData) {
+    return {
+      ok: false,
+      errorCode: "PO_EVENT_NOT_FOUND",
+      message: 'A linha "Postado" foi localizada no SRO, mas os detalhes da Postagem (PO) (Peso, VD, Remetente/Destinat\xE1rio e CEPs) n\xE3o estavam abertos na tela.'
+    };
+  }
   return {
     ok: true,
     data: {
@@ -490,7 +502,7 @@ async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplet
         finish({ ready: false, redirectedToAuth: true, finalUrl: currentUrl });
         return;
       }
-      if (changeInfo.status === "complete") {
+      if (changeInfo.status === "complete" && currentUrl?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
         finish({ ready: true, redirectedToAuth: false, finalUrl: currentUrl });
       }
     };

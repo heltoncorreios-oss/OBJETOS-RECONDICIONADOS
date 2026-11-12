@@ -177,8 +177,7 @@ export function htmlToReadableText(raw: string): string {
   text = text
     .replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, '\n')
     .replace(/<(td|th)\b[^>]*>/gi, ' ')
-    .replace(/<\/th>/gi, ': ')
-    .replace(/<\/td>/gi, ' | ')
+    .replace(/<\/(td|th)>/gi, ' | ')
     .replace(/<[^>]+>/g, ' ');
 
   text = decodeHtmlEntities(text);
@@ -254,7 +253,7 @@ function isolatePostagemSection(fullText: string): string | null {
     if (hasPoDetailSignals(candidateText)) {
       return candidateText;
     }
-    if (!bestBlock) {
+    if (!bestBlock && /\b(?:Peso|VD|Valor\s+Declarado|CEP|Remetente|Destinat[áa]rio)\b/i.test(candidateText)) {
       bestBlock = candidateText;
     }
   }
@@ -453,7 +452,7 @@ export function parseSroContent(
 
   // 1. Peso
   const rawPeso = extractFirstMatch(poSection, [
-    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
     /\b(\d+[.,]\d{1,3}\s*kg)\b/i,
     /\b(\d+\s*(?:g|gs))\b/i,
   ]);
@@ -461,68 +460,99 @@ export function parseSroContent(
 
   // 2. Indicador VD
   const rawVd = extractFirstMatch(poSection, [
-    /(?:Indicador\s+)?VD\s*[:=|]\s*([A-Za-zÃã]+)\b/i,
-    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
+    /(?:Indicador\s+)?VD[ \t]*(?:[:=|]+[ \t]*)+([A-Za-zÃã]+)\b/i,
+    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
   ]);
   const valorDeclarado = parseValorDeclarado(rawVd);
 
   // 3. Unidade de postagem
   const unidadePostagem = extractFirstMatch(poSection, [
-    /Unidade(?:\s+(?:de\s+Postagem|Origem))?\s*[:=|]\s*([^\n|;]+)/i,
-    /Local(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i,
+    /Unidade(?:\s+(?:de\s+Postagem|Origem))?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+    /Local(?:\s+de\s+Postagem)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
   ]).toUpperCase();
 
   // 4. Remetente
-  const remetenteNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Remetente\s*[:=|]\s*([^\n|;]+)/i,
-  ]).toUpperCase();
+  const remetenteNome = (
+    extractFirstMatch(poSection, [
+      /(?:Nome\s+(?:do\s+)?)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+    ]) ||
+    (remIndex >= 0
+      ? extractFirstMatch(remBlock, [
+          /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+        ])
+      : '')
+  ).toUpperCase();
 
   const rawCepRem =
     extractFirstMatch(poSection, [
-      /CEP\s+(?:do\s+)?Remetente\s*[:=|]\s*([0-9.\-]+)/i,
+      /CEP\s+(?:do\s+)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i,
     ]) ||
     (remIndex >= 0
-      ? extractFirstMatch(remBlock, [/CEP\s*[:=|]\s*([0-9.\-]+)/i])
+      ? extractFirstMatch(remBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i])
       : '');
   const cepRemetente = normalizeCepDigits(rawCepRem);
 
   const numeroRemetente =
     extractFirstMatch(poSection, [
-      /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Remetente\s*[:=|]\s*([^\n,;|]+)/i,
+      /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Remetente[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
     ]) ||
     (remIndex >= 0
       ? extractFirstMatch(remBlock, [
-          /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
-          /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-          /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i,
+          /N[úu]mero\s+Logradouro[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+          /N[úu]mero[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+          /(?:N[º°]|Nro|Nr\.?)[ \t]*(?:[:=|]+[ \t]*)*([^\n,;|]+)/i,
         ])
       : '');
 
   // 5. Destinatário
-  const destinatarioNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i,
-  ]).toUpperCase();
+  const destinatarioNome = (
+    extractFirstMatch(poSection, [
+      /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+    ]) ||
+    (destIndex >= 0
+      ? extractFirstMatch(destBlock, [
+          /Nome(?:\s+Completo)?[ \t]*(?:[:=|]+[ \t]*)+([^\n|;]+)/i,
+        ])
+      : '')
+  ).toUpperCase();
 
   const rawCepDest =
     extractFirstMatch(poSection, [
-      /CEP\s+(?:do\s+)?Destinat[áa]rio\s*[:=|]\s*([0-9.\-]+)/i,
+      /CEP\s+(?:do\s+)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i,
     ]) ||
     (destIndex >= 0
-      ? extractFirstMatch(destBlock, [/CEP\s*[:=|]\s*([0-9.\-]+)/i])
+      ? extractFirstMatch(destBlock, [/CEP[ \t]*(?:[:=|]+[ \t]*)+([0-9.\-]+)/i])
       : '');
   const cepDestinatario = normalizeCepDigits(rawCepDest);
 
   const numeroDestinatario =
     extractFirstMatch(poSection, [
-      /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Destinat[áa]rio\s*[:=|]\s*([^\n,;|]+)/i,
+      /N[úu]mero\s+(?:Logradouro\s+)?(?:do\s+)?Destinat[áa]rio[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
     ]) ||
     (destIndex >= 0
       ? extractFirstMatch(destBlock, [
-          /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
-          /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-          /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i,
+          /N[úu]mero\s+Logradouro[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+          /N[úu]mero[ \t]*(?:[:=|]+[ \t]*)+([^\n,;|]+)/i,
+          /(?:N[º°]|Nro|Nr\.?)[ \t]*(?:[:=|]+[ \t]*)*([^\n,;|]+)/i,
         ])
       : '');
+
+  const hasAnyPoData =
+    pesoGramas !== null ||
+    Boolean(valorDeclarado) ||
+    Boolean(cepRemetente) ||
+    Boolean(cepDestinatario) ||
+    Boolean(remetenteNome) ||
+    Boolean(destinatarioNome);
+
+  if (!hasAnyPoData) {
+    return {
+      ok: false,
+      errorCode: 'PO_EVENT_NOT_FOUND',
+      message:
+        'A linha "Postado" foi localizada no SRO, mas os detalhes da Postagem (PO) (Peso, VD, Remetente/Destinatário e CEPs) não estavam abertos na tela.',
+    };
+  }
 
   return {
     ok: true,

@@ -49,13 +49,43 @@
     docs.push(document);
     return docs;
   }
+  function serializeDocumentWithInputValues(doc) {
+    const body = doc.body;
+    if (!body) return "";
+    const clone = body.cloneNode(true);
+    const origInputs = Array.from(body.querySelectorAll("input, textarea, select"));
+    const cloneInputs = Array.from(clone.querySelectorAll("input, textarea, select"));
+    for (let i = 0; i < origInputs.length; i++) {
+      const orig = origInputs[i];
+      const cloned = cloneInputs[i];
+      if (!cloned) continue;
+      if (orig instanceof HTMLInputElement && cloned instanceof HTMLInputElement) {
+        if (orig.type === "password" || orig.type === "hidden") continue;
+        if (orig.value) {
+          cloned.setAttribute("value", orig.value);
+        }
+      } else if (orig instanceof HTMLTextAreaElement && cloned instanceof HTMLTextAreaElement) {
+        if (orig.value && !cloned.textContent) {
+          cloned.textContent = orig.value;
+        }
+      } else if (orig instanceof HTMLSelectElement && cloned instanceof HTMLSelectElement) {
+        const selected = orig.selectedOptions?.[0]?.textContent?.trim();
+        if (selected) {
+          const span = doc.createElement("span");
+          span.textContent = ` ${selected} `;
+          cloned.replaceWith(span);
+        }
+      }
+    }
+    return clone.innerHTML || "";
+  }
   function collectCombinedContent() {
     const docs = getAccessibleDocuments();
     const texts = [];
     const htmls = [];
     for (const doc of docs) {
       const t = doc.body?.innerText || "";
-      const h = doc.body?.innerHTML || "";
+      const h = serializeDocumentWithInputValues(doc);
       if (t.trim()) texts.push(t);
       if (h.trim()) htmls.push(h);
     }
@@ -192,13 +222,14 @@
       const rows = Array.from(doc.querySelectorAll('tr, [role="row"]'));
       for (const row of rows) {
         if (!(row instanceof HTMLElement) || !isElementVisible(row)) continue;
+        if (row.querySelector('tr, [role="row"]') !== null) continue;
         const rowText = (row.innerText || row.textContent || "").replace(/\s+/g, " ").trim();
         if (/aguardando\s+postagem/i.test(rowText)) continue;
-        const cells = Array.from(row.querySelectorAll('td, th, [role="cell"]'));
+        const cells = Array.from(row.querySelectorAll(':scope > td, :scope > th, [role="cell"]'));
         const isPostadoRow = cells.some((cell) => {
           const cellText = (cell.textContent || "").replace(/\s+/g, " ").trim();
           return /^(?:postad[oa]|postagem\s*\(\s*po\s*\)|objeto\s+postad[oa])$/i.test(cellText);
-        }) || /\bpostad[oa]\b/i.test(rowText);
+        });
         if (!isPostadoRow) continue;
         const firstCell = cells[0];
         if (firstCell) {
@@ -207,7 +238,9 @@
           );
           if (detLink instanceof HTMLElement) return detLink;
           const detIcon = firstCell.querySelector("img, svg, i, span");
-          if (detIcon instanceof HTMLElement) return detIcon;
+          if (detIcon instanceof HTMLElement) {
+            return detIcon.closest("a, button, [onclick]") || detIcon;
+          }
           if (firstCell instanceof HTMLElement) return firstCell;
         }
         const rowAction = row.querySelector(
