@@ -66,6 +66,14 @@ function testManifestAndOrigins() {
     'https://buscacepintra.correios.com.br/*',
   ]);
   assert.equal(manifest.content_scripts[3].all_frames, false);
+
+  const zipPath = path.join(ROOT_DIR, 'public', 'extensao-sro-piloto.zip');
+  assert.ok(fs.existsSync(zipPath), 'public/extensao-sro-piloto.zip deve existir após build:extension');
+  const zipBuf = fs.readFileSync(zipPath);
+  assert.equal(zipBuf.subarray(0, 4).toString('binary'), 'PK\x03\x04', 'ZIP deve iniciar com assinatura PKZIP');
+  assert.ok(zipBuf.includes(Buffer.from('manifest.json')), 'ZIP deve conter manifest.json');
+  assert.ok(zipBuf.includes(Buffer.from('buscaCepContentScript.js')), 'ZIP deve conter buscaCepContentScript.js');
+  assert.ok(zipBuf.includes(Buffer.from('LEIA-ME.txt')), 'ZIP deve conter LEIA-ME.txt');
 }
 
 function testParserRules() {

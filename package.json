@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
-    "build": "vite build",
+    "build": "npm run build:extension && vite build",
     "build:extension": "node extension/scripts/build-extension.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Save, 
   Download, 
@@ -8,7 +8,8 @@ import {
   Building2, 
   ShieldCheck, 
   Palette, 
-  Database
+  Database,
+  Puzzle
 } from 'lucide-react';
 import { UnitSettings } from '../types';
 import { 
@@ -20,6 +21,7 @@ import {
   DEFAULT_SETTINGS,
   ServerStatusInfo
 } from '../services/storage';
+import { getDetectedExtensionInfo, pingSroExtension } from '../services/sroService';
 
 interface ConfiguracoesViewProps {
   settings: UnitSettings;
@@ -41,6 +43,19 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
   const [formData, setFormData] = useState<UnitSettings>({ ...settings });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [extInfo, setExtInfo] = useState(() => getDetectedExtensionInfo());
+
+  useEffect(() => {
+    let active = true;
+    void pingSroExtension(400).then((ok) => {
+      if (active && ok) {
+        setExtInfo(getDetectedExtensionInfo());
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Atualizar formulário apenas quando a unidade ativa mudar
   React.useEffect(() => {
@@ -467,6 +482,50 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
             <span>Restaurar Relatórios Originais do Modelo</span>
           </button>
         </div>
+      </div>
+
+      {/* Extensão SRO & Busca CEP para Outras Unidades */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
+          <div className="flex items-center gap-2">
+            <Puzzle className="w-5 h-5 text-[#00416B]" />
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-tight">
+              5. Extensão SRO Intranet &amp; Busca CEP (Instalação em Outras Unidades)
+            </h2>
+          </div>
+          {extInfo.detected ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Extensão ativa neste navegador{extInfo.version ? ` (v${extInfo.version})` : ''}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold">
+              Não detectada nesta estação
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Para que outra unidade utilize o preenchimento automático do SRO Intranet e Busca CEP Intranet sem precisar baixar código-fonte nem instalar Node.js, basta baixar o pacote pronto abaixo diretamente pelo navegador:
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <a
+            href="/extensao-sro-piloto.zip"
+            download="extensao-sro-piloto.zip"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#00416B] hover:bg-[#002D56] text-white text-xs font-bold rounded-lg shadow-xs"
+          >
+            <Download className="w-4 h-4 text-yellow-300" />
+            <span>Baixar Extensão SRO Pronta (.zip)</span>
+          </a>
+        </div>
+
+        <ol className="list-decimal pl-5 text-xs text-slate-700 space-y-1 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+          <li>Clique em <strong>Baixar Extensão SRO Pronta (.zip)</strong> e extraia o arquivo (clique direito → <em>Extrair Tudo...</em>).</li>
+          <li>No Microsoft Edge ou Google Chrome, acesse <code className="px-1 py-0.5 bg-white border border-slate-200 rounded">edge://extensions</code> ou <code className="px-1 py-0.5 bg-white border border-slate-200 rounded">chrome://extensions</code>.</li>
+          <li>Ative o <strong>Modo do desenvolvedor</strong>, clique em <strong>Carregar sem compactação</strong> e escolha a pasta extraída (onde fica o <code className="px-1 py-0.5 bg-white border border-slate-200 rounded">manifest.json</code>).</li>
+          <li>Mantenha uma aba logada no SRO Intranet (<code className="px-1 py-0.5 bg-white border border-slate-200 rounded">srointranet.correios.com.br/rastreamento</code>) e dê <strong>F5</strong> no sistema.</li>
+        </ol>
       </div>
 
     </div>

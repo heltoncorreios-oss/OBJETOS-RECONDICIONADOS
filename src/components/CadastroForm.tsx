@@ -14,7 +14,8 @@ import {
   ExternalLink,
   RefreshCw,
   ClipboardPaste,
-  Settings2
+  Settings2,
+  Download
 } from 'lucide-react';
 import { ObjetoRecord, UnitSettings, ProvidenciaTipo } from '../types';
 import { 
@@ -31,6 +32,7 @@ import {
 import {
   consultarObjetoSroEContatos,
   getConfiguredSroAgentUrl,
+  getDetectedExtensionInfo,
   processarConteudoSroReal,
   setConfiguredSroAgentUrl,
   SRO_INTRANET_URL,
@@ -853,17 +855,29 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                   sroPasteContent.length > 0) && (
                   <div className="pt-2 border-t border-red-200/80 space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <a
-                        href={`${SRO_INTRANET_URL}?objeto=${encodeURIComponent(
-                          normalizeTrackingCode(codigoRastreamento)
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-red-300 text-[11px] font-bold text-[#00416B] hover:bg-sky-50"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Abrir SRO Intranet na aba autenticada
-                      </a>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={`${SRO_INTRANET_URL}?objeto=${encodeURIComponent(
+                            normalizeTrackingCode(codigoRastreamento)
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-red-300 text-[11px] font-bold text-[#00416B] hover:bg-sky-50"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Abrir SRO Intranet na aba autenticada
+                        </a>
+                        {!getDetectedExtensionInfo().detected && (
+                          <a
+                            href="/extensao-sro-piloto.zip"
+                            download="extensao-sro-piloto.zip"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#00416B] text-white text-[11px] font-bold hover:bg-[#002D56]"
+                          >
+                            <Download className="w-3 h-3 text-yellow-300" />
+                            Baixar Extensão SRO (.zip)
+                          </a>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => setShowAgentConfig((prev) => !prev)}
@@ -873,6 +887,11 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                         Agente local
                       </button>
                     </div>
+                    {!getDetectedExtensionInfo().detected && (
+                      <p className="text-[11px] text-slate-700">
+                        Para consulta automática nesta estação: baixe o <strong>.zip</strong> acima, extraia a pasta e carregue em <code>edge://extensions</code> ou <code>chrome://extensions</code> (Modo do desenvolvedor → Carregar sem compactação).
+                      </p>
+                    )}
 
                     {showAgentConfig && (
                       <div className="p-2 rounded bg-white border border-slate-200 space-y-1.5">
