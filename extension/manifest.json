@@ -9,6 +9,7 @@
   ],
   "host_permissions": [
     "https://srointranet.correios.com.br/*",
+    "https://buscacepintra.correios.com.br/*",
     "https://recondicionamentodeobjetos.vercel.app/*"
   ],
   "background": {
@@ -46,6 +47,16 @@
       "run_at": "document_idle",
       "all_frames": false,
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://buscacepintra.correios.com.br/*"
+      ],
+      "js": [
+        "buscaCepContentScript.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "action": {

@@ -10,13 +10,21 @@
  */
 
 import {
+  CepAddressData,
+  parseBuscaCepResult,
+} from '../../src/services/cepService';
+import {
   isValidTrackingCode,
+  normalizeCepDigits,
   normalizeTrackingCode,
   parseSroContent,
   SroErrorCode,
   SroPostagemData,
 } from '../../src/services/sroParser';
 import {
+  BUSCA_CEP_ORIGIN,
+  BUSCA_CEP_QUERY_TIMEOUT_MS,
+  BUSCA_CEP_URL,
   EXTENSION_QUERY_TIMEOUT_MS,
   EXTENSION_TAB_LOAD_TIMEOUT_MS,
   EXTENSION_VERSION,
@@ -43,8 +51,12 @@ export interface ExtensionQueryResult {
 }
 
 const MANAGED_TAB_STORAGE_KEY = 'sroManagedTabId';
+const BUSCA_CEP_TAB_STORAGE_KEY = 'buscaCepManagedTabId';
 let activeQuery: ActiveQueryState | null = null;
 let cachedManagedTabId: number | null = null;
+let cachedBuscaCepTabId: number | null = null;
+let buscaCepQueue: Promise<void> = Promise.resolve();
+const cancelledBuscaCepIds = new Set<string>();
 
 function isTrustedAppSender(sender: chrome.runtime.MessageSender): boolean {
   if (!sender) return false;
@@ -85,9 +97,38 @@ async function saveManagedTabId(tabId: number | null): Promise<void> {
   }
 }
 
+async function getSavedBuscaCepTabId(): Promise<number | null> {
+  if (cachedBuscaCepTabId !== null) return cachedBuscaCepTabId;
+  try {
+    const area = chrome.storage.session || chrome.storage.local;
+    const result = await area.get(BUSCA_CEP_TAB_STORAGE_KEY);
+    const tabId = result?.[BUSCA_CEP_TAB_STORAGE_KEY];
+    if (typeof tabId === 'number') {
+      cachedBuscaCepTabId = tabId;
+      return tabId;
+    }
+  } catch {
+    // Ignorar falha de leitura
+  }
+  return null;
+}
+
+async function saveBuscaCepTabId(tabId: number | null): Promise<void> {
+  cachedBuscaCepTabId = tabId;
+  try {
+    const area = chrome.storage.session || chrome.storage.local;
+    await area.set({ [BUSCA_CEP_TAB_STORAGE_KEY]: tabId });
+  } catch {
+    // Ignorar falha de gravação
+  }
+}
+
 chrome.tabs.onRemoved.addListener((closedTabId) => {
   if (cachedManagedTabId === closedTabId) {
     void saveManagedTabId(null);
+  }
+  if (cachedBuscaCepTabId === closedTabId) {
+    void saveBuscaCepTabId(null);
   }
 });
 
@@ -121,9 +162,17 @@ async function acquireSingleSroTab(targetUrl: string): Promise<chrome.tabs.Tab> 
   return created;
 }
 
-function isLikelyExternalSsoRedirect(url: string | undefined): boolean {
+function isBrowserErrorPage(url: string | undefined): boolean {
   if (!url) return false;
-  if (url.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+  return url.startsWith('chrome-error://') || url.startsWith('edge://error');
+}
+
+function isLikelyExternalSsoRedirect(
+  url: string | undefined,
+  expectedOrigin = SRO_INTRANET_ORIGIN
+): boolean {
+  if (!url) return false;
+  if (url.startsWith(`${expectedOrigin}/`)) {
     return /\/(?:login|sso|auth|cas|signin)/i.test(url);
   }
   return (
@@ -132,21 +181,25 @@ function isLikelyExternalSsoRedirect(url: string | undefined): boolean {
   );
 }
 
-async function waitForTabReady(
+async function waitForOriginTabReady(
   tabId: number,
-  queryState: ActiveQueryState,
+  expectedOrigin: string,
+  isCancelled: () => boolean,
   timeoutMs: number,
   waitForFreshComplete = false
-): Promise<{ ready: boolean; redirectedToAuth: boolean; finalUrl?: string }> {
+): Promise<{ ready: boolean; redirectedToAuth: boolean; unreachable?: boolean; finalUrl?: string }> {
   try {
     const currentTab = await chrome.tabs.get(tabId);
-    if (isLikelyExternalSsoRedirect(currentTab.url)) {
+    if (isBrowserErrorPage(currentTab.url)) {
+      return { ready: false, redirectedToAuth: false, unreachable: true, finalUrl: currentTab.url };
+    }
+    if (isLikelyExternalSsoRedirect(currentTab.url, expectedOrigin)) {
       return { ready: false, redirectedToAuth: true, finalUrl: currentTab.url };
     }
     if (
       !waitForFreshComplete &&
       currentTab.status === 'complete' &&
-      currentTab.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
+      currentTab.url?.startsWith(`${expectedOrigin}/`)
     ) {
       return { ready: true, redirectedToAuth: false, finalUrl: currentTab.url };
     }
@@ -165,7 +218,12 @@ async function waitForTabReady(
       clearInterval(cancelCheck);
     };
 
-    const finish = (res: { ready: boolean; redirectedToAuth: boolean; finalUrl?: string }) => {
+    const finish = (res: {
+      ready: boolean;
+      redirectedToAuth: boolean;
+      unreachable?: boolean;
+      finalUrl?: string;
+    }) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -178,7 +236,7 @@ async function waitForTabReady(
       tab: chrome.tabs.Tab
     ) => {
       if (updatedTabId !== tabId) return;
-      if (queryState.cancelled) {
+      if (isCancelled()) {
         finish({ ready: false, redirectedToAuth: false });
         return;
       }
@@ -188,14 +246,19 @@ async function waitForTabReady(
       }
 
       const currentUrl = changeInfo.url || tab.url;
-      if (isLikelyExternalSsoRedirect(currentUrl)) {
+      if (isBrowserErrorPage(currentUrl)) {
+        finish({ ready: false, redirectedToAuth: false, unreachable: true, finalUrl: currentUrl });
+        return;
+      }
+
+      if (isLikelyExternalSsoRedirect(currentUrl, expectedOrigin)) {
         finish({ ready: false, redirectedToAuth: true, finalUrl: currentUrl });
         return;
       }
 
       if (
         changeInfo.status === 'complete' &&
-        currentUrl?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
+        currentUrl?.startsWith(`${expectedOrigin}/`)
       ) {
         finish({ ready: true, redirectedToAuth: false, finalUrl: currentUrl });
       }
@@ -208,9 +271,13 @@ async function waitForTabReady(
       if (settled || !waitForFreshComplete || sawLoading) return;
       try {
         const tabNow = await chrome.tabs.get(tabId);
+        if (isBrowserErrorPage(tabNow.url)) {
+          finish({ ready: false, redirectedToAuth: false, unreachable: true, finalUrl: tabNow.url });
+          return;
+        }
         if (
           tabNow.status === 'complete' &&
-          tabNow.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
+          tabNow.url?.startsWith(`${expectedOrigin}/`)
         ) {
           finish({ ready: true, redirectedToAuth: false, finalUrl: tabNow.url });
         }
@@ -220,7 +287,7 @@ async function waitForTabReady(
     }, 600);
 
     const cancelCheck = setInterval(() => {
-      if (queryState.cancelled) {
+      if (isCancelled()) {
         finish({ ready: false, redirectedToAuth: false });
       }
     }, 150);
@@ -229,6 +296,21 @@ async function waitForTabReady(
       finish({ ready: false, redirectedToAuth: false });
     }, timeoutMs);
   });
+}
+
+async function waitForTabReady(
+  tabId: number,
+  queryState: ActiveQueryState,
+  timeoutMs: number,
+  waitForFreshComplete = false
+): Promise<{ ready: boolean; redirectedToAuth: boolean; finalUrl?: string }> {
+  return waitForOriginTabReady(
+    tabId,
+    SRO_INTRANET_ORIGIN,
+    () => queryState.cancelled,
+    timeoutMs,
+    waitForFreshComplete
+  );
 }
 
 async function sendExtractDomWithRetry(
@@ -582,6 +664,279 @@ async function executeSroQuery(
   }
 }
 
+export interface ExtensionBuscaCepResult {
+  ok: boolean;
+  requestId: string;
+  cep: string;
+  data?: CepAddressData;
+  notFound?: boolean;
+  authRequired?: boolean;
+  captchaRequired?: boolean;
+  error?: string;
+}
+
+async function acquireSingleBuscaCepTab(): Promise<{
+  tab: chrome.tabs.Tab;
+  alreadyOnTargetUrl: boolean;
+}> {
+  const savedTabId = await getSavedBuscaCepTabId();
+  if (savedTabId !== null) {
+    try {
+      const existing = await chrome.tabs.get(savedTabId);
+      if (existing && existing.id !== undefined) {
+        if (existing.url?.startsWith(BUSCA_CEP_URL) && existing.status === 'complete') {
+          return { tab: existing, alreadyOnTargetUrl: true };
+        }
+        const updated = await chrome.tabs.update(existing.id, {
+          url: BUSCA_CEP_URL,
+          active: false,
+        });
+        return { tab: updated, alreadyOnTargetUrl: false };
+      }
+    } catch {
+      await saveBuscaCepTabId(null);
+    }
+  }
+
+  const existingTabs = await chrome.tabs.query({ url: `${BUSCA_CEP_ORIGIN}/*` });
+  if (existingTabs.length > 0 && existingTabs[0].id !== undefined) {
+    const reused = existingTabs[0];
+    await saveBuscaCepTabId(reused.id!);
+    if (reused.url?.startsWith(BUSCA_CEP_URL) && reused.status === 'complete') {
+      return { tab: reused, alreadyOnTargetUrl: true };
+    }
+    const updated = await chrome.tabs.update(reused.id!, {
+      url: BUSCA_CEP_URL,
+      active: false,
+    });
+    return { tab: updated, alreadyOnTargetUrl: false };
+  }
+
+  const created = await chrome.tabs.create({ url: BUSCA_CEP_URL, active: false });
+  if (created.id !== undefined) {
+    await saveBuscaCepTabId(created.id);
+  }
+  return { tab: created, alreadyOnTargetUrl: false };
+}
+
+async function sendBuscaCepExtractWithRetry(
+  tabId: number,
+  cleanCep: string,
+  requestId: string,
+  isCancelled: () => boolean
+): Promise<any> {
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (isCancelled()) return null;
+    try {
+      return await chrome.tabs.sendMessage(tabId, {
+        type: 'BUSCA_CEP_EXTRACT_DOM',
+        cep: cleanCep,
+        requestId,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (/message channel closed|back\/forward cache/i.test(msg)) {
+        const reloadState = await waitForOriginTabReady(
+          tabId,
+          BUSCA_CEP_ORIGIN,
+          isCancelled,
+          7000,
+          true
+        );
+        if (!reloadState.ready) {
+          if (reloadState.redirectedToAuth) {
+            return { ok: false, authRequired: true };
+          }
+          throw err;
+        }
+        continue;
+      }
+
+      if (/Receiving end does not exist/i.test(msg) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+
+async function executeBuscaCepQueryInner(
+  cleanCep: string,
+  requestId: string
+): Promise<ExtensionBuscaCepResult> {
+  const isCancelled = () => cancelledBuscaCepIds.has(requestId);
+  if (isCancelled()) {
+    return { ok: false, requestId, cep: cleanCep, error: 'Consulta de CEP cancelada.' };
+  }
+
+  try {
+    const { tab, alreadyOnTargetUrl } = await acquireSingleBuscaCepTab();
+    if (tab.id === undefined) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        error: 'Não foi possível abrir a aba do Busca CEP Intranet.',
+      };
+    }
+
+    if (!alreadyOnTargetUrl) {
+      const loadState = await waitForOriginTabReady(
+        tab.id,
+        BUSCA_CEP_ORIGIN,
+        isCancelled,
+        BUSCA_CEP_QUERY_TIMEOUT_MS,
+        true
+      );
+      if (isCancelled()) {
+        return { ok: false, requestId, cep: cleanCep, error: 'Consulta de CEP cancelada.' };
+      }
+      if (loadState.redirectedToAuth) {
+        return {
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          authRequired: true,
+          error: 'O Busca CEP Intranet exige sessão autenticada.',
+        };
+      }
+      if (!loadState.ready || loadState.unreachable) {
+        return {
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          error: 'Busca CEP Intranet inacessível a partir desta estação.',
+        };
+      }
+    }
+
+    let domRes = await sendBuscaCepExtractWithRetry(tab.id, cleanCep, requestId, isCancelled);
+    if (domRes && domRes.inputFound === false && alreadyOnTargetUrl && !isCancelled()) {
+      // Garantir estado limpo recarregando a URL base do Busca CEP Intranet se não encontrou input
+      await chrome.tabs.update(tab.id, { url: BUSCA_CEP_URL, active: false });
+      const reloadState = await waitForOriginTabReady(
+        tab.id,
+        BUSCA_CEP_ORIGIN,
+        isCancelled,
+        8000,
+        true
+      );
+      if (reloadState.ready) {
+        domRes = await sendBuscaCepExtractWithRetry(tab.id, cleanCep, requestId, isCancelled);
+      }
+    }
+
+    if (!domRes) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        error: 'Sem resposta do leitor do Busca CEP Intranet.',
+      };
+    }
+
+    if (domRes.authRequired) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        authRequired: true,
+        error: 'Sessão não autenticada no Busca CEP Intranet.',
+      };
+    }
+
+    if (domRes.captchaRequired) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        captchaRequired: true,
+        error: 'Busca CEP Intranet solicitou validação de captcha.',
+      };
+    }
+
+    if (domRes.notFound) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        notFound: true,
+        error: 'CEP não encontrado no Busca CEP Intranet.',
+      };
+    }
+
+    const parsed = parseBuscaCepResult(domRes.html || domRes.text || '', cleanCep);
+    if (!parsed.ok || !parsed.data) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        notFound: parsed.notFound,
+        authRequired: parsed.authRequired,
+        captchaRequired: parsed.captchaRequired,
+        error: parsed.error || domRes.error || 'Não foi possível extrair o endereço no Busca CEP Intranet.',
+      };
+    }
+
+    return {
+      ok: true,
+      requestId,
+      cep: cleanCep,
+      data: parsed.data,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      requestId,
+      cep: cleanCep,
+      error: err?.message || 'Erro ao consultar o Busca CEP Intranet.',
+    };
+  } finally {
+    cancelledBuscaCepIds.delete(requestId);
+  }
+}
+
+function executeBuscaCepQuery(rawCep: string, requestId: string): Promise<ExtensionBuscaCepResult> {
+  const cleanCep = normalizeCepDigits(rawCep);
+  if (!cleanCep) {
+    return Promise.resolve({
+      ok: false,
+      requestId,
+      cep: '',
+      error: 'CEP inválido para consulta no Busca CEP Intranet.',
+    });
+  }
+
+  // Serializar consultas concorrentes (Remetente + Destinatário) na aba única do Busca CEP Intranet
+  const run = buscaCepQueue.then(async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<ExtensionBuscaCepResult>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          error: 'Tempo limite na consulta ao Busca CEP Intranet.',
+        });
+      }, BUSCA_CEP_QUERY_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([executeBuscaCepQueryInner(cleanCep, requestId), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  });
+
+  buscaCepQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedAppSender(sender)) {
     sendResponse({
@@ -615,6 +970,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ ok: true });
     return false;
+  }
+
+  if (message.type === 'BUSCA_CEP_CANCEL') {
+    if (typeof message.requestId === 'string' && message.requestId) {
+      cancelledBuscaCepIds.add(message.requestId);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message.type === 'BUSCA_CEP_REQUEST') {
+    const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+    const cep = typeof message.cep === 'string' ? message.cep : '';
+    if (!requestId) {
+      sendResponse({ ok: false, cep: '', error: 'requestId ausente na consulta de CEP.' });
+      return false;
+    }
+    void executeBuscaCepQuery(cep, requestId).then((res) => sendResponse(res));
+    return true;
   }
 
   if (message.type === 'SRO_QUERY_REQUEST') {

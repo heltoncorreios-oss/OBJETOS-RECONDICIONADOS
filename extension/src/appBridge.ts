@@ -93,6 +93,81 @@ if (isTrustedPageContext()) {
       return;
     }
 
+    if (msg.type === 'BUSCA_CEP_CANCEL') {
+      const requestId =
+        typeof msg.requestId === 'string' && REQUEST_ID_REGEX.test(msg.requestId)
+          ? msg.requestId
+          : '';
+      try {
+        chrome.runtime.sendMessage({
+          type: 'BUSCA_CEP_CANCEL',
+          requestId,
+        });
+      } catch {
+        // Ignorar falha de cancelamento se o contexto foi recarregado
+      }
+      return;
+    }
+
+    if (msg.type === 'BUSCA_CEP_REQUEST') {
+      const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
+      const rawCep = typeof msg.cep === 'string' ? msg.cep.replace(/\D/g, '') : '';
+
+      if (!REQUEST_ID_REGEX.test(requestId) || !/^\d{8}$/.test(rawCep)) {
+        postBackToApp({
+          type: 'BUSCA_CEP_RESPONSE',
+          ok: false,
+          requestId,
+          cep: rawCep,
+          error: 'Solicitação de CEP inválida enviada à extensão.',
+        });
+        return;
+      }
+
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'BUSCA_CEP_REQUEST',
+            requestId,
+            cep: rawCep,
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              postBackToApp({
+                type: 'BUSCA_CEP_RESPONSE',
+                ok: false,
+                requestId,
+                cep: rawCep,
+                error:
+                  chrome.runtime.lastError.message ||
+                  'Falha de comunicação interna com o Busca CEP Intranet.',
+              });
+              return;
+            }
+
+            postBackToApp({
+              type: 'BUSCA_CEP_RESPONSE',
+              ...(res || {
+                ok: false,
+                requestId,
+                cep: rawCep,
+                error: 'Resposta vazia do Busca CEP Intranet.',
+              }),
+            });
+          }
+        );
+      } catch (err: any) {
+        postBackToApp({
+          type: 'BUSCA_CEP_RESPONSE',
+          ok: false,
+          requestId,
+          cep: rawCep,
+          error: String(err?.message || 'Erro ao acionar o Busca CEP Intranet.'),
+        });
+      }
+      return;
+    }
+
     if (msg.type === 'SRO_QUERY_REQUEST') {
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
       const trackingCode = sanitizeTrackingCode(msg.trackingCode);

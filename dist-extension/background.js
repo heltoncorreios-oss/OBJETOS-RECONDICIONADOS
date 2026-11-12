@@ -12,6 +12,11 @@ function normalizeCepDigits(cep) {
   const digits = cep.replace(/\D/g, "");
   return digits.length === 8 ? digits : "";
 }
+function formatCepDisplay(cep) {
+  const digits = normalizeCepDigits(cep);
+  if (!digits) return "";
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+}
 function parseWeightToGrams(rawWeight) {
   if (rawWeight === null || rawWeight === void 0) return null;
   if (typeof rawWeight === "number") {
@@ -109,9 +114,10 @@ function htmlToReadableText(raw) {
   let text = raw.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
   text = text.replace(/\splaceholder=["'][^"']*["']/gi, " ");
   text = text.replace(/<input[^>]*value=["']([^"']*)["'][^>]*>/gi, " $1 ");
+  text = text.replace(/[\r\n]+/g, " ");
   text = text.replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, "\n").replace(/<(td|th)\b[^>]*>/gi, " ").replace(/<\/(td|th)>/gi, " | ").replace(/<[^>]+>/g, " ");
   text = decodeHtmlEntities(text);
-  return text.replace(/[ \t]+/g, " ").replace(/\r\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return text.replace(/[ \t]+/g, " ").replace(/:[ \t]*\n+[ \t]*\|/g, ": |").replace(/\r\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 function hasPoDetailSignals(text) {
   const hasRemAndDest = /\bRemetente\b/i.test(text) && /\bDestinat[áa]rio\b/i.test(text);
@@ -392,19 +398,216 @@ function parseSroContent(rawInput, expectedTrackingCode) {
   };
 }
 
+// src/services/cepService.ts
+function decodeBasicEntities(text) {
+  const entities = {
+    "&nbsp;": " ",
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": '"',
+    "&#39;": "'",
+    "&aacute;": "\xE1",
+    "&Aacute;": "\xC1",
+    "&agrave;": "\xE0",
+    "&Agrave;": "\xC0",
+    "&acirc;": "\xE2",
+    "&Acirc;": "\xC2",
+    "&atilde;": "\xE3",
+    "&Atilde;": "\xC3",
+    "&eacute;": "\xE9",
+    "&Eacute;": "\xC9",
+    "&ecirc;": "\xEA",
+    "&Ecirc;": "\xCA",
+    "&iacute;": "\xED",
+    "&Iacute;": "\xCD",
+    "&oacute;": "\xF3",
+    "&Oacute;": "\xD3",
+    "&ocirc;": "\xF4",
+    "&Ocirc;": "\xD4",
+    "&otilde;": "\xF5",
+    "&Otilde;": "\xD5",
+    "&uacute;": "\xFA",
+    "&Uacute;": "\xDA",
+    "&uuml;": "\xFC",
+    "&Uuml;": "\xDC",
+    "&ccedil;": "\xE7",
+    "&Ccedil;": "\xC7",
+    "&ordm;": "\xBA",
+    "&ordf;": "\xAA"
+  };
+  let out = text;
+  for (const [k, v] of Object.entries(entities)) {
+    out = out.split(k).join(v);
+  }
+  return out.replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)));
+}
+function cleanCellText(rawHtml) {
+  return decodeBasicEntities(
+    rawHtml.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ")
+  ).replace(/\s+/g, " ").trim();
+}
+function cleanCorreiosStreetSuffix(street) {
+  return street.replace(
+    /\s*-\s*(?:at[ée]\s+\d+|de\s+\d+(?:\/\d+)?\s+(?:a|ao)\s+|lado\s+(?:par|[íi]mpar)|exceto\b).*$/i,
+    ""
+  ).replace(/\s+/g, " ").trim().toUpperCase();
+}
+function splitLocalidadeUf(raw) {
+  const cleaned = raw.replace(/\s+/g, " ").trim();
+  const slashMatch = cleaned.match(/^(.*?)\s*\/\s*([A-Za-z]{2})$/);
+  if (slashMatch) {
+    return {
+      localidade: slashMatch[1].trim().toUpperCase(),
+      uf: slashMatch[2].trim().toUpperCase()
+    };
+  }
+  const dashMatch = cleaned.match(/^(.*?)\s*-\s*([A-Za-z]{2})$/);
+  if (dashMatch) {
+    return {
+      localidade: dashMatch[1].trim().toUpperCase(),
+      uf: dashMatch[2].trim().toUpperCase()
+    };
+  }
+  return { localidade: cleaned.toUpperCase(), uf: "" };
+}
+function parseBuscaCepResult(rawInput, expectedCep) {
+  const cep = normalizeCepDigits(expectedCep);
+  if (!cep) {
+    return { ok: false, cep: "", error: "CEP inv\xE1lido ou ausente." };
+  }
+  const raw = typeof rawInput === "string" ? rawInput : "";
+  if (!raw.trim()) {
+    return { ok: false, cep, error: "Nenhum conte\xFAdo retornado pelo Busca CEP Intranet." };
+  }
+  const plainCheck = cleanCellText(raw);
+  if (/type=["']password["']/i.test(raw) || /(?:idcorreios|autentica[çc][ãa]o\s+corporativa|fa[çc]a\s+login|usu[áa]rio\s+e\s+senha)/i.test(
+    plainCheck
+  )) {
+    return {
+      ok: false,
+      cep,
+      authRequired: true,
+      error: "O Busca CEP Intranet exige sess\xE3o autenticada."
+    };
+  }
+  if (/(?:captcha\s+inv[áa]lido|digite\s+o\s+texto\s+(?:da|contido\s+na)\s+imagem|caracteres\s+da\s+imagem)/i.test(
+    plainCheck
+  )) {
+    return {
+      ok: false,
+      cep,
+      captchaRequired: true,
+      error: "O Busca CEP Intranet solicitou valida\xE7\xE3o de captcha."
+    };
+  }
+  if (/(?:dados\s+n[ãa]o\s+encontrados|n[ãa]o\s+h[áa]\s+dados\s+a\s+serem\s+exibidos|cep\s+n[ãa]o\s+encontrado)/i.test(
+    plainCheck
+  )) {
+    return {
+      ok: false,
+      cep,
+      notFound: true,
+      error: `CEP ${formatCepDisplay(cep)} n\xE3o encontrado no Busca CEP Intranet.`
+    };
+  }
+  const rows = [];
+  const trMatches = raw.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  for (const tr of trMatches) {
+    const cellMatches = tr.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) || [];
+    if (cellMatches.length >= 2) {
+      rows.push(cellMatches.map((c) => cleanCellText(c)));
+    }
+  }
+  if (rows.length === 0) {
+    for (const line of raw.split(/\r?\n/)) {
+      const cols = line.split(/\s*\|\s*|\t+/).map((c) => c.trim()).filter((c) => c.length > 0);
+      if (cols.length >= 3) {
+        rows.push(cols);
+      }
+    }
+  }
+  let logIdx = 0;
+  let bairroIdx = 1;
+  let locIdx = 2;
+  let cepIdx = 3;
+  let matchedRow = null;
+  for (const cells of rows) {
+    const lowerCells = cells.map((c) => c.toLowerCase());
+    const looksLikeHeader = lowerCells.some((c) => /logradouro/.test(c)) && lowerCells.some((c) => /localidade|cidade|cep/.test(c));
+    if (looksLikeHeader) {
+      const foundLog = lowerCells.findIndex((c) => /logradouro/.test(c));
+      const foundBairro = lowerCells.findIndex((c) => /bairro/.test(c));
+      const foundLoc = lowerCells.findIndex((c) => /localidade|cidade/.test(c));
+      const foundCep = lowerCells.findIndex((c) => /\bcep\b/.test(c));
+      if (foundLog >= 0) logIdx = foundLog;
+      if (foundBairro >= 0) bairroIdx = foundBairro;
+      if (foundLoc >= 0) locIdx = foundLoc;
+      if (foundCep >= 0) cepIdx = foundCep;
+      continue;
+    }
+    const candidateCepRaw = cells[cepIdx] || cells[cells.length - 1] || "";
+    const rowCepDigits = normalizeCepDigits(candidateCepRaw);
+    const hasLocality = Boolean((cells[locIdx] || "").trim());
+    if (rowCepDigits === cep && hasLocality) {
+      matchedRow = cells;
+      break;
+    }
+    if (!rowCepDigits && hasLocality && cells.length >= 3 && !matchedRow) {
+      matchedRow = cells;
+    }
+  }
+  if (!matchedRow) {
+    return {
+      ok: false,
+      cep,
+      error: `Resultado estruturado do CEP ${formatCepDisplay(cep)} n\xE3o localizado no Busca CEP Intranet.`
+    };
+  }
+  const logradouro = cleanCorreiosStreetSuffix(matchedRow[logIdx] || "");
+  const bairro = (matchedRow[bairroIdx] || "").trim().toUpperCase();
+  const { localidade, uf } = splitLocalidadeUf(matchedRow[locIdx] || "");
+  if (!localidade && !logradouro && !uf) {
+    return {
+      ok: false,
+      cep,
+      error: `Dados insuficientes para o CEP ${formatCepDisplay(cep)} no Busca CEP Intranet.`
+    };
+  }
+  return {
+    ok: true,
+    cep,
+    data: {
+      cep,
+      cepFormatado: formatCepDisplay(cep),
+      logradouro,
+      bairro,
+      localidade,
+      uf
+    }
+  };
+}
+
 // extension/src/config.ts
 var OFFICIAL_APP_ORIGIN = "https://recondicionamentodeobjetos.vercel.app";
 var OFFICIAL_APP_URL_PREFIX = `${OFFICIAL_APP_ORIGIN}/`;
 var SRO_INTRANET_ORIGIN = "https://srointranet.correios.com.br";
 var SRO_INTRANET_BASE_URL = `${SRO_INTRANET_ORIGIN}/rastreamento`;
+var BUSCA_CEP_ORIGIN = "https://buscacepintra.correios.com.br";
+var BUSCA_CEP_URL = `${BUSCA_CEP_ORIGIN}/app/endereco/index.php`;
 var EXTENSION_VERSION = "1.0.0";
 var EXTENSION_QUERY_TIMEOUT_MS = 2e4;
 var EXTENSION_TAB_LOAD_TIMEOUT_MS = 12e3;
+var BUSCA_CEP_QUERY_TIMEOUT_MS = 12e3;
 
 // extension/src/background.ts
 var MANAGED_TAB_STORAGE_KEY = "sroManagedTabId";
+var BUSCA_CEP_TAB_STORAGE_KEY = "buscaCepManagedTabId";
 var activeQuery = null;
 var cachedManagedTabId = null;
+var cachedBuscaCepTabId = null;
+var buscaCepQueue = Promise.resolve();
+var cancelledBuscaCepIds = /* @__PURE__ */ new Set();
 function isTrustedAppSender(sender) {
   if (!sender) return false;
   if (sender.frameId !== void 0 && sender.frameId !== 0) return false;
@@ -434,9 +637,34 @@ async function saveManagedTabId(tabId) {
   } catch {
   }
 }
+async function getSavedBuscaCepTabId() {
+  if (cachedBuscaCepTabId !== null) return cachedBuscaCepTabId;
+  try {
+    const area = chrome.storage.session || chrome.storage.local;
+    const result = await area.get(BUSCA_CEP_TAB_STORAGE_KEY);
+    const tabId = result?.[BUSCA_CEP_TAB_STORAGE_KEY];
+    if (typeof tabId === "number") {
+      cachedBuscaCepTabId = tabId;
+      return tabId;
+    }
+  } catch {
+  }
+  return null;
+}
+async function saveBuscaCepTabId(tabId) {
+  cachedBuscaCepTabId = tabId;
+  try {
+    const area = chrome.storage.session || chrome.storage.local;
+    await area.set({ [BUSCA_CEP_TAB_STORAGE_KEY]: tabId });
+  } catch {
+  }
+}
 chrome.tabs.onRemoved.addListener((closedTabId) => {
   if (cachedManagedTabId === closedTabId) {
     void saveManagedTabId(null);
+  }
+  if (cachedBuscaCepTabId === closedTabId) {
+    void saveBuscaCepTabId(null);
   }
 });
 async function acquireSingleSroTab(targetUrl) {
@@ -463,20 +691,27 @@ async function acquireSingleSroTab(targetUrl) {
   }
   return created;
 }
-function isLikelyExternalSsoRedirect(url) {
+function isBrowserErrorPage(url) {
   if (!url) return false;
-  if (url.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+  return url.startsWith("chrome-error://") || url.startsWith("edge://error");
+}
+function isLikelyExternalSsoRedirect(url, expectedOrigin = SRO_INTRANET_ORIGIN) {
+  if (!url) return false;
+  if (url.startsWith(`${expectedOrigin}/`)) {
     return /\/(?:login|sso|auth|cas|signin)/i.test(url);
   }
   return url.startsWith("https://") && /(?:idcorreios|cas|sso|login|auth|adfs|acesso\.correios)/i.test(url);
 }
-async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplete = false) {
+async function waitForOriginTabReady(tabId, expectedOrigin, isCancelled, timeoutMs, waitForFreshComplete = false) {
   try {
     const currentTab = await chrome.tabs.get(tabId);
-    if (isLikelyExternalSsoRedirect(currentTab.url)) {
+    if (isBrowserErrorPage(currentTab.url)) {
+      return { ready: false, redirectedToAuth: false, unreachable: true, finalUrl: currentTab.url };
+    }
+    if (isLikelyExternalSsoRedirect(currentTab.url, expectedOrigin)) {
       return { ready: false, redirectedToAuth: true, finalUrl: currentTab.url };
     }
-    if (!waitForFreshComplete && currentTab.status === "complete" && currentTab.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+    if (!waitForFreshComplete && currentTab.status === "complete" && currentTab.url?.startsWith(`${expectedOrigin}/`)) {
       return { ready: true, redirectedToAuth: false, finalUrl: currentTab.url };
     }
   } catch {
@@ -499,7 +734,7 @@ async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplet
     };
     const onUpdated = (updatedTabId, changeInfo, tab) => {
       if (updatedTabId !== tabId) return;
-      if (queryState.cancelled) {
+      if (isCancelled()) {
         finish({ ready: false, redirectedToAuth: false });
         return;
       }
@@ -507,11 +742,15 @@ async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplet
         sawLoading = true;
       }
       const currentUrl = changeInfo.url || tab.url;
-      if (isLikelyExternalSsoRedirect(currentUrl)) {
+      if (isBrowserErrorPage(currentUrl)) {
+        finish({ ready: false, redirectedToAuth: false, unreachable: true, finalUrl: currentUrl });
+        return;
+      }
+      if (isLikelyExternalSsoRedirect(currentUrl, expectedOrigin)) {
         finish({ ready: false, redirectedToAuth: true, finalUrl: currentUrl });
         return;
       }
-      if (changeInfo.status === "complete" && currentUrl?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+      if (changeInfo.status === "complete" && currentUrl?.startsWith(`${expectedOrigin}/`)) {
         finish({ ready: true, redirectedToAuth: false, finalUrl: currentUrl });
       }
     };
@@ -520,14 +759,18 @@ async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplet
       if (settled || !waitForFreshComplete || sawLoading) return;
       try {
         const tabNow = await chrome.tabs.get(tabId);
-        if (tabNow.status === "complete" && tabNow.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+        if (isBrowserErrorPage(tabNow.url)) {
+          finish({ ready: false, redirectedToAuth: false, unreachable: true, finalUrl: tabNow.url });
+          return;
+        }
+        if (tabNow.status === "complete" && tabNow.url?.startsWith(`${expectedOrigin}/`)) {
           finish({ ready: true, redirectedToAuth: false, finalUrl: tabNow.url });
         }
       } catch {
       }
     }, 600);
     const cancelCheck = setInterval(() => {
-      if (queryState.cancelled) {
+      if (isCancelled()) {
         finish({ ready: false, redirectedToAuth: false });
       }
     }, 150);
@@ -535,6 +778,15 @@ async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplet
       finish({ ready: false, redirectedToAuth: false });
     }, timeoutMs);
   });
+}
+async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplete = false) {
+  return waitForOriginTabReady(
+    tabId,
+    SRO_INTRANET_ORIGIN,
+    () => queryState.cancelled,
+    timeoutMs,
+    waitForFreshComplete
+  );
 }
 async function sendExtractDomWithRetry(tabId, cleanCode, requestId, queryState) {
   const maxAttempts = 3;
@@ -815,6 +1067,237 @@ async function executeSroQuery(rawCode, requestId) {
     }
   }
 }
+async function acquireSingleBuscaCepTab() {
+  const savedTabId = await getSavedBuscaCepTabId();
+  if (savedTabId !== null) {
+    try {
+      const existing = await chrome.tabs.get(savedTabId);
+      if (existing && existing.id !== void 0) {
+        if (existing.url?.startsWith(BUSCA_CEP_URL) && existing.status === "complete") {
+          return { tab: existing, alreadyOnTargetUrl: true };
+        }
+        const updated = await chrome.tabs.update(existing.id, {
+          url: BUSCA_CEP_URL,
+          active: false
+        });
+        return { tab: updated, alreadyOnTargetUrl: false };
+      }
+    } catch {
+      await saveBuscaCepTabId(null);
+    }
+  }
+  const existingTabs = await chrome.tabs.query({ url: `${BUSCA_CEP_ORIGIN}/*` });
+  if (existingTabs.length > 0 && existingTabs[0].id !== void 0) {
+    const reused = existingTabs[0];
+    await saveBuscaCepTabId(reused.id);
+    if (reused.url?.startsWith(BUSCA_CEP_URL) && reused.status === "complete") {
+      return { tab: reused, alreadyOnTargetUrl: true };
+    }
+    const updated = await chrome.tabs.update(reused.id, {
+      url: BUSCA_CEP_URL,
+      active: false
+    });
+    return { tab: updated, alreadyOnTargetUrl: false };
+  }
+  const created = await chrome.tabs.create({ url: BUSCA_CEP_URL, active: false });
+  if (created.id !== void 0) {
+    await saveBuscaCepTabId(created.id);
+  }
+  return { tab: created, alreadyOnTargetUrl: false };
+}
+async function sendBuscaCepExtractWithRetry(tabId, cleanCep, requestId, isCancelled) {
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (isCancelled()) return null;
+    try {
+      return await chrome.tabs.sendMessage(tabId, {
+        type: "BUSCA_CEP_EXTRACT_DOM",
+        cep: cleanCep,
+        requestId
+      });
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (/message channel closed|back\/forward cache/i.test(msg)) {
+        const reloadState = await waitForOriginTabReady(
+          tabId,
+          BUSCA_CEP_ORIGIN,
+          isCancelled,
+          7e3,
+          true
+        );
+        if (!reloadState.ready) {
+          if (reloadState.redirectedToAuth) {
+            return { ok: false, authRequired: true };
+          }
+          throw err;
+        }
+        continue;
+      }
+      if (/Receiving end does not exist/i.test(msg) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+async function executeBuscaCepQueryInner(cleanCep, requestId) {
+  const isCancelled = () => cancelledBuscaCepIds.has(requestId);
+  if (isCancelled()) {
+    return { ok: false, requestId, cep: cleanCep, error: "Consulta de CEP cancelada." };
+  }
+  try {
+    const { tab, alreadyOnTargetUrl } = await acquireSingleBuscaCepTab();
+    if (tab.id === void 0) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        error: "N\xE3o foi poss\xEDvel abrir a aba do Busca CEP Intranet."
+      };
+    }
+    if (!alreadyOnTargetUrl) {
+      const loadState = await waitForOriginTabReady(
+        tab.id,
+        BUSCA_CEP_ORIGIN,
+        isCancelled,
+        BUSCA_CEP_QUERY_TIMEOUT_MS,
+        true
+      );
+      if (isCancelled()) {
+        return { ok: false, requestId, cep: cleanCep, error: "Consulta de CEP cancelada." };
+      }
+      if (loadState.redirectedToAuth) {
+        return {
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          authRequired: true,
+          error: "O Busca CEP Intranet exige sess\xE3o autenticada."
+        };
+      }
+      if (!loadState.ready || loadState.unreachable) {
+        return {
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          error: "Busca CEP Intranet inacess\xEDvel a partir desta esta\xE7\xE3o."
+        };
+      }
+    }
+    let domRes = await sendBuscaCepExtractWithRetry(tab.id, cleanCep, requestId, isCancelled);
+    if (domRes && domRes.inputFound === false && alreadyOnTargetUrl && !isCancelled()) {
+      await chrome.tabs.update(tab.id, { url: BUSCA_CEP_URL, active: false });
+      const reloadState = await waitForOriginTabReady(
+        tab.id,
+        BUSCA_CEP_ORIGIN,
+        isCancelled,
+        8e3,
+        true
+      );
+      if (reloadState.ready) {
+        domRes = await sendBuscaCepExtractWithRetry(tab.id, cleanCep, requestId, isCancelled);
+      }
+    }
+    if (!domRes) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        error: "Sem resposta do leitor do Busca CEP Intranet."
+      };
+    }
+    if (domRes.authRequired) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        authRequired: true,
+        error: "Sess\xE3o n\xE3o autenticada no Busca CEP Intranet."
+      };
+    }
+    if (domRes.captchaRequired) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        captchaRequired: true,
+        error: "Busca CEP Intranet solicitou valida\xE7\xE3o de captcha."
+      };
+    }
+    if (domRes.notFound) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        notFound: true,
+        error: "CEP n\xE3o encontrado no Busca CEP Intranet."
+      };
+    }
+    const parsed = parseBuscaCepResult(domRes.html || domRes.text || "", cleanCep);
+    if (!parsed.ok || !parsed.data) {
+      return {
+        ok: false,
+        requestId,
+        cep: cleanCep,
+        notFound: parsed.notFound,
+        authRequired: parsed.authRequired,
+        captchaRequired: parsed.captchaRequired,
+        error: parsed.error || domRes.error || "N\xE3o foi poss\xEDvel extrair o endere\xE7o no Busca CEP Intranet."
+      };
+    }
+    return {
+      ok: true,
+      requestId,
+      cep: cleanCep,
+      data: parsed.data
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      requestId,
+      cep: cleanCep,
+      error: err?.message || "Erro ao consultar o Busca CEP Intranet."
+    };
+  } finally {
+    cancelledBuscaCepIds.delete(requestId);
+  }
+}
+function executeBuscaCepQuery(rawCep, requestId) {
+  const cleanCep = normalizeCepDigits(rawCep);
+  if (!cleanCep) {
+    return Promise.resolve({
+      ok: false,
+      requestId,
+      cep: "",
+      error: "CEP inv\xE1lido para consulta no Busca CEP Intranet."
+    });
+  }
+  const run = buscaCepQueue.then(async () => {
+    let timer = null;
+    const timeoutPromise = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        resolve({
+          ok: false,
+          requestId,
+          cep: cleanCep,
+          error: "Tempo limite na consulta ao Busca CEP Intranet."
+        });
+      }, BUSCA_CEP_QUERY_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([executeBuscaCepQueryInner(cleanCep, requestId), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  });
+  buscaCepQueue = run.then(
+    () => void 0,
+    () => void 0
+  );
+  return run;
+}
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedAppSender(sender)) {
     sendResponse({
@@ -842,6 +1325,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ ok: true });
     return false;
+  }
+  if (message.type === "BUSCA_CEP_CANCEL") {
+    if (typeof message.requestId === "string" && message.requestId) {
+      cancelledBuscaCepIds.add(message.requestId);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === "BUSCA_CEP_REQUEST") {
+    const requestId = typeof message.requestId === "string" ? message.requestId : "";
+    const cep = typeof message.cep === "string" ? message.cep : "";
+    if (!requestId) {
+      sendResponse({ ok: false, cep: "", error: "requestId ausente na consulta de CEP." });
+      return false;
+    }
+    void executeBuscaCepQuery(cep, requestId).then((res) => sendResponse(res));
+    return true;
   }
   if (message.type === "SRO_QUERY_REQUEST") {
     const requestId = typeof message.requestId === "string" ? message.requestId : "";

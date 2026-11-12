@@ -31,6 +31,7 @@ async function buildExtension() {
       path.join(EXT_DIR, 'src', 'appBridge.ts'),
       path.join(EXT_DIR, 'src', 'sroContentScript.ts'),
       path.join(EXT_DIR, 'src', 'sroMainClickHelper.ts'),
+      path.join(EXT_DIR, 'src', 'buscaCepContentScript.ts'),
       path.join(EXT_DIR, 'src', 'popup.ts'),
     ],
     outdir: OUT_DIR,

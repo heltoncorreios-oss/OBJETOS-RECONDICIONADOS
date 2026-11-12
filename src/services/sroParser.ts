@@ -174,6 +174,10 @@ export function htmlToReadableText(raw: string): string {
   // Preservar valores de inputs caso a tela tenha campos read-only
   text = text.replace(/<input[^>]*value=["']([^"']*)["'][^>]*>/gi, ' $1 ');
 
+  // Em HTML formatado com indentação, quebras de linha do código-fonte entre <td>Rótulo:</td>\n<td>Valor</td>
+  // não representam quebra visual e precisam virar espaço antes da conversão de tags de bloco.
+  text = text.replace(/[\r\n]+/g, ' ');
+
   text = text
     .replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, '\n')
     .replace(/<(td|th)\b[^>]*>/gi, ' ')
@@ -184,6 +188,7 @@ export function htmlToReadableText(raw: string): string {
 
   return text
     .replace(/[ \t]+/g, ' ')
+    .replace(/:[ \t]*\n+[ \t]*\|/g, ': |')
     .replace(/\r\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')

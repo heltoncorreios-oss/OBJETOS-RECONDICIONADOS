@@ -14,9 +14,13 @@ export const OFFICIAL_APP_URL_PREFIX = `${OFFICIAL_APP_ORIGIN}/`;
 export const SRO_INTRANET_ORIGIN = 'https://srointranet.correios.com.br';
 export const SRO_INTRANET_BASE_URL = `${SRO_INTRANET_ORIGIN}/rastreamento`;
 
+export const BUSCA_CEP_ORIGIN = 'https://buscacepintra.correios.com.br';
+export const BUSCA_CEP_URL = `${BUSCA_CEP_ORIGIN}/app/endereco/index.php`;
+
 export const EXTENSION_VERSION = '1.0.0';
 export const EXTENSION_QUERY_TIMEOUT_MS = 20000;
 export const EXTENSION_TAB_LOAD_TIMEOUT_MS = 12000;
+export const BUSCA_CEP_QUERY_TIMEOUT_MS = 12000;
 
 export const APP_CHANNEL_SOURCE = 'CORREIOS_RECONDICIONADOS_APP';
 export const EXT_CHANNEL_SOURCE = 'CORREIOS_SRO_EXTENSION_V1';

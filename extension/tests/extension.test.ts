@@ -7,6 +7,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  formatAddressFromCep,
+  parseBuscaCepResult,
+} from '../../src/services/cepService';
 import { parseSroContent, parseWeightToGrams } from '../../src/services/sroParser';
 import {
   OFFICIAL_APP_ORIGIN as SERVICE_APP_ORIGIN,
@@ -37,13 +41,14 @@ function testManifestAndOrigins() {
   // Host permissions e content_scripts sem curingas *.vercel.app
   assert.deepEqual(manifest.host_permissions, [
     'https://srointranet.correios.com.br/*',
+    'https://buscacepintra.correios.com.br/*',
     'https://recondicionamentodeobjetos.vercel.app/*',
   ]);
   const serialized = JSON.stringify(manifest);
   assert.ok(!serialized.includes('*.vercel.app'), 'Não pode conter wildcard *.vercel.app');
   assert.ok(!serialized.includes('<all_urls>'), 'Não pode conter <all_urls>');
 
-  assert.equal(manifest.content_scripts.length, 3);
+  assert.equal(manifest.content_scripts.length, 4);
   assert.deepEqual(manifest.content_scripts[0].matches, [
     'https://recondicionamentodeobjetos.vercel.app/*',
   ]);
@@ -57,6 +62,10 @@ function testManifestAndOrigins() {
   ]);
   assert.equal(manifest.content_scripts[2].all_frames, false);
   assert.equal(manifest.content_scripts[2].world, 'MAIN');
+  assert.deepEqual(manifest.content_scripts[3].matches, [
+    'https://buscacepintra.correios.com.br/*',
+  ]);
+  assert.equal(manifest.content_scripts[3].all_frames, false);
 }
 
 function testParserRules() {
@@ -232,6 +241,97 @@ function testParserRules() {
   assert.equal(parsedRealPo.data?.numeroRemetente, '134');
   assert.equal(parsedRealPo.data?.valorDeclarado, 'SIM');
   assert.equal(parsedRealPo.data?.pesoGramas, 2580);
+
+  // Regressão crítica: HTML identado com quebras de linha (\n) entre <td>Rótulo:</td>\n<td>Valor</td>
+  const multilineRealPoHtml = `
+    <table>
+      <tr>
+        <th colspan="2">AE139312695BR - Postagem (PO)</th>
+      </tr>
+      <tr>
+        <td>Unidade:</td>
+        <td>04035971 / AGF SANTA CRUZ</td>
+      </tr>
+      <tr>
+        <td>CEP Destinatário:</td>
+        <td>18652442 &nbsp; Destinatário: MARINALVA CRISTINA CRESPILHO TARZONI</td>
+      </tr>
+      <tr>
+        <td>Número Logradouro:</td>
+        <td>100</td>
+      </tr>
+      <tr>
+        <td>CEP Remetente:</td>
+        <td>04041000 &nbsp; Remetente: PHARMACOM SOLUCOES PHARMACEUTICAS</td>
+      </tr>
+      <tr>
+        <td>Número Logradouro:</td>
+        <td>134</td>
+      </tr>
+      <tr>
+        <td>AR:</td>
+        <td>N &nbsp; VD: S</td>
+      </tr>
+      <tr>
+        <td>Código de Serviço:</td>
+        <td>03220 - SEDEX CONTRATO AG &nbsp; Peso: 2,580 kg</td>
+      </tr>
+    </table>
+  `;
+  const parsedMultiline = parseSroContent(multilineRealPoHtml, 'AE139312695BR');
+  assert.equal(parsedMultiline.ok, true);
+  assert.equal(parsedMultiline.data?.unidadePostagem, '04035971 / AGF SANTA CRUZ');
+  assert.equal(parsedMultiline.data?.cepDestinatario, '18652442');
+  assert.equal(parsedMultiline.data?.destinatarioNome, 'MARINALVA CRISTINA CRESPILHO TARZONI');
+  assert.equal(parsedMultiline.data?.numeroDestinatario, '100');
+  assert.equal(parsedMultiline.data?.cepRemetente, '04041000');
+  assert.equal(parsedMultiline.data?.remetenteNome, 'PHARMACOM SOLUCOES PHARMACEUTICAS');
+  assert.equal(parsedMultiline.data?.numeroRemetente, '134');
+  assert.equal(parsedMultiline.data?.valorDeclarado, 'SIM');
+  assert.equal(parsedMultiline.data?.pesoGramas, 2580);
+}
+
+function testBuscaCepIntranetParser() {
+  const tabelaBuscaCep = `
+    <table id="resultado-DNEC">
+      <thead>
+        <tr>
+          <th>Logradouro/Nome</th>
+          <th>Bairro/Distrito</th>
+          <th>Localidade/UF</th>
+          <th>CEP</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td data-th="Logradouro/Nome">Rua Afonso Celso - até 500 - lado par</td>
+          <td data-th="Bairro/Distrito">Vila Mariana</td>
+          <td data-th="Localidade/UF">São Paulo/SP</td>
+          <td data-th="CEP">04041-000</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+
+  const okRes = parseBuscaCepResult(tabelaBuscaCep, '04041000');
+  assert.equal(okRes.ok, true);
+  assert.equal(okRes.data?.logradouro, 'RUA AFONSO CELSO');
+  assert.equal(okRes.data?.bairro, 'VILA MARIANA');
+  assert.equal(okRes.data?.localidade, 'SÃO PAULO');
+  assert.equal(okRes.data?.uf, 'SP');
+  assert.equal(okRes.data?.cepFormatado, '04041-000');
+  assert.equal(
+    formatAddressFromCep(okRes.data, '134'),
+    'RUA AFONSO CELSO, 134 - VILA MARIANA, SÃO PAULO/SP'
+  );
+
+  // Não pode aceitar CEP divergente
+  const mismatchRes = parseBuscaCepResult(tabelaBuscaCep, '18652442');
+  assert.equal(mismatchRes.ok, false);
+
+  const notFoundRes = parseBuscaCepResult('<div>Dados não encontrados</div>', '99999999');
+  assert.equal(notFoundRes.ok, false);
+  assert.equal(notFoundRes.notFound, true);
 }
 
 function testExtensionCommunicationValidation() {
@@ -476,12 +576,90 @@ async function testBackgroundOriginAndSingleTabReuse() {
   assert.equal(recoveredResponse.data.pesoGramas, 850);
   assert.equal(navAttempts, 2);
 
+  // Consultas concorrentes ao Busca CEP Intranet devem ser serializadas em uma única aba sem colisão
+  const buscaCepTab = {
+    id: 77,
+    url: 'https://buscacepintra.correios.com.br/app/endereco/index.php',
+    status: 'complete',
+  };
+  (globalThis as any).chrome.tabs.query = async (q: any) => {
+    if (String(q?.url || '').includes('buscacepintra')) return [buscaCepTab];
+    return [existingTab];
+  };
+  (globalThis as any).chrome.tabs.get = async (id: number) => {
+    if (id === 77) return buscaCepTab;
+    return id === 42 ? existingTab : null;
+  };
+  sendMessageOverride = null;
+  (globalThis as any).chrome.tabs.sendMessage = async (_tabId: number, msg: any) => {
+    if (msg.type === 'BUSCA_CEP_EXTRACT_DOM') {
+      await new Promise((r) => setTimeout(r, 20));
+      if (msg.cep === '04041000') {
+        return {
+          ok: true,
+          html: `
+            <table id="resultado-DNEC">
+              <tr><th>Logradouro/Nome</th><th>Bairro/Distrito</th><th>Localidade/UF</th><th>CEP</th></tr>
+              <tr><td>Rua Domingos de Morais</td><td>Vila Mariana</td><td>São Paulo/SP</td><td>04041-000</td></tr>
+            </table>
+          `,
+          text: '',
+        };
+      }
+      return {
+        ok: true,
+        html: `
+          <table id="resultado-DNEC">
+            <tr><th>Logradouro/Nome</th><th>Bairro/Distrito</th><th>Localidade/UF</th><th>CEP</th></tr>
+            <tr><td>Rua José Vicente da Costa</td><td>Cohab III</td><td>São Manuel/SP</td><td>18652-442</td></tr>
+          </table>
+        `,
+        text: '',
+      };
+    }
+    return mockDomRes;
+  };
+
+  const [remCepRes, destCepRes] = await Promise.all([
+    new Promise<any>((resolve) =>
+      handler(
+        { type: 'BUSCA_CEP_REQUEST', requestId: 'cep_req_1111', cep: '04041000' },
+        {
+          origin: 'https://recondicionamentodeobjetos.vercel.app',
+          frameId: 0,
+          tab: { url: 'https://recondicionamentodeobjetos.vercel.app/' },
+        },
+        resolve
+      )
+    ),
+    new Promise<any>((resolve) =>
+      handler(
+        { type: 'BUSCA_CEP_REQUEST', requestId: 'cep_req_2222', cep: '18652442' },
+        {
+          origin: 'https://recondicionamentodeobjetos.vercel.app',
+          frameId: 0,
+          tab: { url: 'https://recondicionamentodeobjetos.vercel.app/' },
+        },
+        resolve
+      )
+    ),
+  ]);
+
+  assert.equal(remCepRes.ok, true);
+  assert.equal(remCepRes.requestId, 'cep_req_1111');
+  assert.equal(remCepRes.data.logradouro, 'RUA DOMINGOS DE MORAIS');
+  assert.equal(destCepRes.ok, true);
+  assert.equal(destCepRes.requestId, 'cep_req_2222');
+  assert.equal(destCepRes.data.localidade, 'SÃO MANUEL');
+  assert.equal(createdTabs.length, 0, 'Busca CEP Intranet também deve reutilizar uma única aba');
+
   delete (globalThis as any).chrome;
 }
 
 async function main() {
   testManifestAndOrigins();
   testParserRules();
+  testBuscaCepIntranetParser();
   testExtensionCommunicationValidation();
   await testBackgroundOriginAndSingleTabReuse();
   console.log('Todos os testes da extensão piloto e do parser passaram com sucesso!');

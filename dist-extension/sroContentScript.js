@@ -4,6 +4,8 @@
   var OFFICIAL_APP_URL_PREFIX = `${OFFICIAL_APP_ORIGIN}/`;
   var SRO_INTRANET_ORIGIN = "https://srointranet.correios.com.br";
   var SRO_INTRANET_BASE_URL = `${SRO_INTRANET_ORIGIN}/rastreamento`;
+  var BUSCA_CEP_ORIGIN = "https://buscacepintra.correios.com.br";
+  var BUSCA_CEP_URL = `${BUSCA_CEP_ORIGIN}/app/endereco/index.php`;
 
   // extension/src/sroContentScript.ts
   function isLoginOrAuthScreen(text) {
