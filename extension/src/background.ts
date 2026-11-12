@@ -340,7 +340,76 @@ async function executeSroQueryInner(
       };
     }
 
-    const domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
+    const existingSroTabsBefore = await chrome.tabs
+      .query({ url: `${SRO_INTRANET_ORIGIN}/*` })
+      .catch(() => []);
+    const existingIdsBefore = new Set(
+      existingSroTabsBefore
+        .map((t) => t.id)
+        .filter((id): id is number => typeof id === 'number')
+    );
+
+    let openedPopupTabId: number | null = null;
+    const onPopupCreated = (newTab: chrome.tabs.Tab) => {
+      if (
+        newTab &&
+        typeof newTab.id === 'number' &&
+        newTab.id !== tab.id &&
+        (newTab.openerTabId === tab.id || !existingIdsBefore.has(newTab.id))
+      ) {
+        openedPopupTabId = newTab.id;
+      }
+    };
+    chrome.tabs.onCreated?.addListener(onPopupCreated);
+
+    let domRes: any;
+    let usedPopupTabId: number | null = null;
+    try {
+      domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
+
+      // Se clicou no ícone Det / guia Postado e abriu um popup/nova aba sem renderizar na aba principal, extrair da nova aba
+      if (domRes && !domRes.authRequired && !domRes.notFound && !domRes.hasPoDetail) {
+        if (openedPopupTabId === null) {
+          await new Promise((r) => setTimeout(r, 250));
+          const tabsAfter = await chrome.tabs
+            .query({ url: `${SRO_INTRANET_ORIGIN}/*` })
+            .catch(() => []);
+          const extraTab = tabsAfter.find(
+            (t) => typeof t.id === 'number' && !existingIdsBefore.has(t.id)
+          );
+          if (extraTab && typeof extraTab.id === 'number') {
+            openedPopupTabId = extraTab.id;
+          }
+        }
+
+        if (openedPopupTabId !== null && !queryState.cancelled) {
+          usedPopupTabId = openedPopupTabId;
+          const popupLoad = await waitForTabReady(openedPopupTabId, queryState, 8000, false);
+          if (popupLoad.redirectedToAuth) {
+            domRes = { ok: false, authRequired: true };
+          } else if (popupLoad.ready) {
+            const popupDom = await sendExtractDomWithRetry(
+              openedPopupTabId,
+              cleanCode,
+              requestId,
+              queryState
+            );
+            if (popupDom && (popupDom.hasPoDetail || popupDom.authRequired)) {
+              domRes = popupDom;
+            }
+          }
+        }
+      }
+    } finally {
+      chrome.tabs.onCreated?.removeListener(onPopupCreated);
+      if (usedPopupTabId !== null) {
+        try {
+          await chrome.tabs.remove?.(usedPopupTabId);
+        } catch {
+          // Ignorar falha ao fechar aba temporária
+        }
+      }
+    }
 
     if (queryState.cancelled) {
       return {
@@ -376,7 +445,9 @@ async function executeSroQueryInner(
       };
     }
 
-    if (!domRes.notFound && !domRes.hasTrackingMatch) {
+    const allowPopupDetailWithoutCode = usedPopupTabId !== null && Boolean(domRes.hasPoDetail);
+
+    if (!domRes.notFound && !domRes.hasTrackingMatch && !allowPopupDetailWithoutCode) {
       let diagnostic =
         'A aba do SRO Intranet abriu, mas o resultado do objeto não carregou automaticamente na tela.';
       if (domRes.inputFound === false) {
@@ -401,6 +472,10 @@ async function executeSroQueryInner(
     const parsed = parseSroContent(rawContent, cleanCode);
 
     if (!parsed.ok || !parsed.data) {
+      const extraHint =
+        domRes.postadoRowFound && !domRes.hasPoDetail
+          ? ' A linha "Postado" apareceu na tabela, mas a guia/detalhe do evento não abriu automaticamente.'
+          : '';
       return {
         ok: false,
         requestId,
@@ -408,8 +483,9 @@ async function executeSroQueryInner(
         extensionVersion: EXTENSION_VERSION,
         errorCode: parsed.errorCode || 'PARSE_ERROR',
         message:
-          parsed.message ||
-          'Não foi possível localizar o evento Postagem (PO) para este objeto no SRO.',
+          (parsed.message ||
+            'Não foi possível localizar o evento Postagem (PO) para este objeto no SRO.') +
+          extraHint,
       };
     }
 

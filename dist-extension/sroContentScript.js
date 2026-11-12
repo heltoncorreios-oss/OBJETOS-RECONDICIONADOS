@@ -19,15 +19,54 @@
     );
   }
   function hasPostagemHint(text) {
-    return /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]|\bobjeto\s+postad[oa]\b)/i.test(
+    return /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]|\bobjeto\s+postad[oa]\b|\bpostad[oa]\b)/i.test(
       text
     );
+  }
+  function hasPoDetailFields(text) {
+    if (!text) return false;
+    const hasRemetente = /\bRemetente\b/i.test(text);
+    const hasDestinatario = /\bDestinat[áa]rio\b/i.test(text);
+    const hasMetric = /\b(?:Peso|VD|Valor\s+Declarado|CEP)\b/i.test(text);
+    return hasRemetente && hasDestinatario && hasMetric;
   }
   function normalizeCodeUpper(code) {
     return (code || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
+  function getAccessibleDocuments() {
+    const docs = [];
+    const frames = Array.from(document.querySelectorAll("iframe, frame"));
+    for (const frame of frames) {
+      try {
+        const f = frame;
+        const doc = f.contentDocument || f.contentWindow?.document;
+        if (doc && doc.body && (doc.body.innerText || "").trim()) {
+          docs.push(doc);
+        }
+      } catch {
+      }
+    }
+    docs.push(document);
+    return docs;
+  }
+  function collectCombinedContent() {
+    const docs = getAccessibleDocuments();
+    const texts = [];
+    const htmls = [];
+    for (const doc of docs) {
+      const t = doc.body?.innerText || "";
+      const h = doc.body?.innerHTML || "";
+      if (t.trim()) texts.push(t);
+      if (h.trim()) htmls.push(h);
+    }
+    return {
+      text: texts.join("\n\n"),
+      html: htmls.join("\n")
+    };
+  }
   function isElementVisible(el) {
-    const style = window.getComputedStyle(el);
+    const win = el.ownerDocument?.defaultView || window;
+    const style = win.getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
     }
@@ -137,12 +176,56 @@
     );
     return { inputFound: true, searchTriggered: true };
   }
+  function findPostadoTrigger() {
+    const docs = getAccessibleDocuments();
+    for (const doc of docs) {
+      const tabCandidates = Array.from(
+        doc.querySelectorAll('[role="tab"], .nav-link, .tab, .ui-tabs-anchor, a, button')
+      );
+      for (const el of tabCandidates) {
+        if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
+        const label = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+        if (/^(?:postad[oa]|postagem\s*\(\s*po\s*\)|guia\s+postad[oa])$/i.test(label)) {
+          return el;
+        }
+      }
+      const rows = Array.from(doc.querySelectorAll('tr, [role="row"]'));
+      for (const row of rows) {
+        if (!(row instanceof HTMLElement) || !isElementVisible(row)) continue;
+        const rowText = (row.innerText || row.textContent || "").replace(/\s+/g, " ").trim();
+        if (/aguardando\s+postagem/i.test(rowText)) continue;
+        const cells = Array.from(row.querySelectorAll('td, th, [role="cell"]'));
+        const isPostadoRow = cells.some((cell) => {
+          const cellText = (cell.textContent || "").replace(/\s+/g, " ").trim();
+          return /^(?:postad[oa]|postagem\s*\(\s*po\s*\)|objeto\s+postad[oa])$/i.test(cellText);
+        }) || /\bpostad[oa]\b/i.test(rowText);
+        if (!isPostadoRow) continue;
+        const firstCell = cells[0];
+        if (firstCell) {
+          const detLink = firstCell.querySelector(
+            'a, button, input[type="button"], input[type="image"], [onclick], [ng-click]'
+          );
+          if (detLink instanceof HTMLElement) return detLink;
+          const detIcon = firstCell.querySelector("img, svg, i, span");
+          if (detIcon instanceof HTMLElement) return detIcon;
+          if (firstCell instanceof HTMLElement) return firstCell;
+        }
+        const rowAction = row.querySelector(
+          'a, button, input[type="button"], input[type="image"], [onclick], [ng-click], img'
+        );
+        if (rowAction instanceof HTMLElement) return rowAction;
+        return row;
+      }
+    }
+    return null;
+  }
   function waitForInitialMount(trackingCode, timeoutMs) {
     const cleanCode = normalizeCodeUpper(trackingCode);
     const readyNow = () => {
-      const text = document.body?.innerText || "";
+      const { text } = collectCombinedContent();
       if (isLoginOrAuthScreen(text) || isObjectNotFoundText(text)) return true;
-      if (text.toUpperCase().includes(cleanCode) && hasPostagemHint(text)) return true;
+      if (hasPoDetailFields(text)) return true;
+      if (text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null) return true;
       if (findTrackingInput() !== null) return true;
       return false;
     };
@@ -172,19 +255,19 @@
       timer = setTimeout(finish, timeoutMs);
     });
   }
-  function waitForRenderedSroDom(trackingCode, timeoutMs) {
+  function waitForSummaryOrPoDetail(trackingCode, timeoutMs) {
     const cleanCode = normalizeCodeUpper(trackingCode);
     const isDomReady = () => {
-      const text = document.body?.innerText || "";
+      const { text } = collectCombinedContent();
       if (!text.trim()) return false;
       if (isLoginOrAuthScreen(text)) return true;
       if (isObjectNotFoundText(text)) return true;
-      const upperText = text.toUpperCase();
       const loadingBusy = Boolean(
         document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
       );
       if (loadingBusy) return false;
-      if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text))) {
+      if (hasPoDetailFields(text)) return true;
+      if (text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null) {
         return true;
       }
       return false;
@@ -207,7 +290,7 @@
       };
       observer = new MutationObserver(() => {
         if (isDomReady()) {
-          setTimeout(() => finish(true), 200);
+          setTimeout(() => finish(true), 150);
         }
       });
       if (document.body) {
@@ -221,7 +304,49 @@
         if (isDomReady()) {
           finish(true);
         }
-      }, 300);
+      }, 250);
+      timer = setTimeout(() => finish(false), timeoutMs);
+    });
+  }
+  function waitForPoDetailDom(timeoutMs) {
+    const readyNow = () => {
+      const { text } = collectCombinedContent();
+      if (isLoginOrAuthScreen(text)) return true;
+      const loadingBusy = Boolean(
+        document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
+      );
+      if (loadingBusy) return false;
+      return hasPoDetailFields(text);
+    };
+    if (readyNow()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let finished = false;
+      let observer = null;
+      let timer = null;
+      let poll = null;
+      const finish = (ok) => {
+        if (finished) return;
+        finished = true;
+        observer?.disconnect();
+        if (timer) clearTimeout(timer);
+        if (poll) clearInterval(poll);
+        resolve(ok);
+      };
+      observer = new MutationObserver(() => {
+        if (readyNow()) {
+          setTimeout(() => finish(true), 150);
+        }
+      });
+      if (document.body) {
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true
+        });
+      }
+      poll = setInterval(() => {
+        if (readyNow()) finish(true);
+      }, 250);
       timer = setTimeout(() => finish(false), timeoutMs);
     });
   }
@@ -239,35 +364,46 @@
     }
     const cleanCode = normalizeCodeUpper(msg.trackingCode);
     await waitForInitialMount(cleanCode, 2e3);
-    let text = document.body?.innerText || "";
-    if (isLoginOrAuthScreen(text)) {
+    let combined = collectCombinedContent();
+    if (isLoginOrAuthScreen(combined.text)) {
       return {
         ok: false,
         requestId: msg.requestId,
         trackingCode: cleanCode,
         authRequired: true,
-        text,
+        text: combined.text,
         html: "",
         url: window.location.href
       };
     }
     let inputFound = false;
     let searchTriggered = false;
-    const upperInitial = text.toUpperCase();
-    const alreadyHasResults = upperInitial.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text));
-    if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+    let postadoRowFound = false;
+    let postadoDetailTriggered = false;
+    const hasTableOrDetailNow = hasPoDetailFields(combined.text) || combined.text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null;
+    if (!hasTableOrDetailNow && !isObjectNotFoundText(combined.text)) {
       const triggerRes = triggerInputAndSearch(cleanCode);
       inputFound = triggerRes.inputFound;
       searchTriggered = triggerRes.searchTriggered;
+      await waitForSummaryOrPoDetail(cleanCode, searchTriggered ? 6500 : 800);
+      combined = collectCombinedContent();
     }
-    if (!alreadyHasResults && !isObjectNotFoundText(text)) {
-      await waitForRenderedSroDom(cleanCode, searchTriggered ? 7e3 : 800);
+    if (!isLoginOrAuthScreen(combined.text) && !isObjectNotFoundText(combined.text) && !hasPoDetailFields(combined.text)) {
+      const postadoTrigger = findPostadoTrigger();
+      if (postadoTrigger) {
+        postadoRowFound = true;
+        postadoTrigger.click();
+        postadoDetailTriggered = true;
+        await waitForPoDetailDom(4e3);
+        combined = collectCombinedContent();
+      }
     }
-    text = document.body?.innerText || "";
-    const html = document.body?.innerHTML || "";
+    const text = combined.text;
+    const html = combined.html;
     const authRequired = isLoginOrAuthScreen(text);
     const notFound = isObjectNotFoundText(text);
     const hasTrackingMatch = text.toUpperCase().includes(cleanCode);
+    const hasPoDetail = hasPoDetailFields(text);
     return {
       ok: !authRequired,
       requestId: msg.requestId,
@@ -276,6 +412,9 @@
       notFound,
       hasTrackingMatch,
       hasPostagemHint: hasPostagemHint(text),
+      hasPoDetail,
+      postadoRowFound,
+      postadoDetailTriggered,
       inputFound,
       searchTriggered,
       text,

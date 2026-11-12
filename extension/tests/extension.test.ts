@@ -123,6 +123,39 @@ function testParserRules() {
   assert.equal(parsedPlaceholder.data?.codigoRastreamento, 'AE139312695BR');
   assert.equal(parsedPlaceholder.data?.pesoGramas, 1400);
   assert.equal(parsedPlaceholder.data?.valorDeclarado, 'NÃO');
+
+  // Regressão: tabela real do SRO Intranet (Det | Data Hora | Local | Situação | Nº evt) + bloco de detalhe da guia "Postado"
+  const sroTablePlusPostadoDetail = `
+    <div>AE139312695BR (SEDEX) 12/11/2026 17:23:14</div>
+    <table>
+      <tr><th>Det</th><th>Data Hora</th><th>Local</th><th>Situação</th><th>Nº evt</th></tr>
+      <tr><td>Det</td><td>12/11/2026 11:51:16</td><td>AC SAO MANUEL - SAO MANUEL / SP</td><td>Aguardando retirada</td><td>1</td></tr>
+      <tr><td>Det</td><td>11/11/2026 17:51:40</td><td>AGF SANTA CRUZ - SAO PAULO / SP</td><td>Postado</td><td>1</td></tr>
+      <tr><td>Det</td><td>11/11/2026 12:14:48</td><td>Interface Pré-Postagem Nacional - / BR Aguardando postagem pelo remetente</td><td>Etiqueta emitida</td><td>1</td></tr>
+    </table>
+    <div>
+      <h3>Postado</h3>
+      <div>11/11/2026 17:51:40</div>
+      <div>Unidade: AGF SANTA CRUZ - SAO PAULO / SP</div>
+      <div>Peso: 2,580 kg</div>
+      <div>VD: S</div>
+      <div>Remetente: REMETENTE REAL</div>
+      <div>CEP Remetente: 04041-000</div>
+      <div>Número Logradouro: 134</div>
+      <div>Destinatário: DESTINATARIO REAL</div>
+      <div>CEP Destinatário: 18650-065</div>
+      <div>Número Logradouro: 792</div>
+    </div>
+  `;
+  const parsedPostadoDet = parseSroContent(sroTablePlusPostadoDetail, 'AE139312695BR');
+  assert.equal(parsedPostadoDet.ok, true);
+  assert.equal(parsedPostadoDet.data?.pesoGramas, 2580);
+  assert.equal(parsedPostadoDet.data?.valorDeclarado, 'SIM');
+  assert.equal(parsedPostadoDet.data?.unidadePostagem, 'AGF SANTA CRUZ - SAO PAULO / SP');
+  assert.equal(parsedPostadoDet.data?.cepRemetente, '04041000');
+  assert.equal(parsedPostadoDet.data?.numeroRemetente, '134');
+  assert.equal(parsedPostadoDet.data?.cepDestinatario, '18650065');
+  assert.equal(parsedPostadoDet.data?.numeroDestinatario, '792');
 }
 
 function testExtensionCommunicationValidation() {

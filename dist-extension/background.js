@@ -52,6 +52,13 @@ function parseValorDeclarado(rawVd) {
   if (cleaned === "N" || cleaned === "NAO" || cleaned === "N\xC3O" || /\bVD\s*[:=]?\s*N\b/i.test(cleaned)) {
     return "N\xC3O";
   }
+  const moneyMatch = cleaned.match(/R\$\s*(\d+(?:[.,]\d+)?)/i);
+  if (moneyMatch) {
+    const val = parseFloat(moneyMatch[1].replace(".", "").replace(",", "."));
+    if (Number.isFinite(val)) {
+      return val > 0 ? "SIM" : "N\xC3O";
+    }
+  }
   return "";
 }
 function decodeHtmlEntities(text) {
@@ -106,23 +113,57 @@ function htmlToReadableText(raw) {
   text = decodeHtmlEntities(text);
   return text.replace(/[ \t]+/g, " ").replace(/\r\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+function hasPoDetailSignals(text) {
+  const hasRemAndDest = /\bRemetente\b/i.test(text) && /\bDestinat[áa]rio\b/i.test(text);
+  const hasDetailMetric = /\b(?:Peso|VD|Valor\s+Declarado|CEP)\b/i.test(text);
+  return hasRemAndDest && hasDetailMetric;
+}
 function isolatePostagemSection(fullText) {
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
-  const poStartRegex = /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b)/i;
-  const otherEventHeaderRegex = /^(?:\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}|(?:BDE|BDI|BDR|BLQ|CAR|CD|CMT|CO|CUN|DO|EST|FC|IDC|LDI|OEC|PAR|PMT|RO|TR)\s*[-–:]|\b(?:Entregue|Saiu para entrega|Objeto encaminhado|Objeto recebido|Objeto em transfer[êe]ncia)\b)/i;
-  const startIdx = lines.findIndex((line) => poStartRegex.test(line));
-  if (startIdx === -1) {
+  const poStartRegex = /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\s*(?:\(\s*PO\s*\))?\s*$)/i;
+  const explicitOtherEventRegex = /(?:^(?:BDE|BDI|BDR|BLQ|CAR|CD|CMT|CO|CUN|DO|EST|FC|IDC|LDI|OEC|PAR|PMT|RO|TR)\s*[-–:]|\b(?:Entregue|Saiu para entrega|Objeto encaminhado|Objeto recebido|Objeto em transfer[êe]ncia|Aguardando retirada|Objeto\/unitizador expedido|Objeto\/unitizador desembarcado|Objeto\/unitizador embarcado|Passagem interna|Etiqueta emitida|Aguardando postagem)\b)/i;
+  const candidateIndices = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (poStartRegex.test(line) && !/aguardando\s+postagem/i.test(line)) {
+      candidateIndices.push(i);
+    }
+  }
+  if (candidateIndices.length === 0) {
+    if (hasPoDetailSignals(fullText) && /\b(?:Postado|Postagem|\bPO\b)\b/i.test(fullText)) {
+      return lines.join("\n");
+    }
     return null;
   }
-  const collected = [];
-  for (let i = startIdx; i < lines.length; i++) {
-    const line = lines[i];
-    if (i > startIdx && otherEventHeaderRegex.test(line) && !poStartRegex.test(line)) {
-      break;
+  let bestBlock = "";
+  for (const startIdx of candidateIndices) {
+    const collected = [];
+    let sawRemDest = false;
+    for (let i = startIdx; i < lines.length; i++) {
+      const line = lines[i];
+      if (i > startIdx) {
+        if (explicitOtherEventRegex.test(line) && !poStartRegex.test(line)) {
+          break;
+        }
+        if (sawRemDest && /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(line)) {
+          break;
+        }
+      }
+      collected.push(line);
+      const joinedNow = collected.join("\n");
+      if (/\bRemetente\b/i.test(joinedNow) && /\bDestinat[áa]rio\b/i.test(joinedNow)) {
+        sawRemDest = true;
+      }
     }
-    collected.push(line);
+    const candidateText = collected.join("\n");
+    if (hasPoDetailSignals(candidateText)) {
+      return candidateText;
+    }
+    if (!bestBlock) {
+      bestBlock = candidateText;
+    }
   }
-  return collected.join("\n");
+  return bestBlock || null;
 }
 function cleanFieldValue(val) {
   if (!val) return "";
@@ -270,21 +311,22 @@ function parseSroContent(rawInput, expectedTrackingCode) {
     destBlock = poSection.slice(destIndex);
   }
   const rawPeso = extractFirstMatch(poSection, [
-    /Peso(?:\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
     /\b(\d+[.,]\d{1,3}\s*kg)\b/i,
     /\b(\d+\s*(?:g|gs))\b/i
   ]);
   const pesoGramas = parseWeightToGrams(rawPeso);
   const rawVd = extractFirstMatch(poSection, [
     /(?:Indicador\s+)?VD\s*[:=|]\s*([A-Za-zÃã]+)\b/i,
-    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([A-Za-zÃã]+)\b/i
+    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([^\n|;]+)/i
   ]);
   const valorDeclarado = parseValorDeclarado(rawVd);
   const unidadePostagem = extractFirstMatch(poSection, [
-    /Unidade(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i
+    /Unidade(?:\s+(?:de\s+Postagem|Origem))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Local(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i
   ]).toUpperCase();
   const remetenteNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+do\s+)?Remetente\s*[:=|]\s*([^\n|;]+)/i
+    /(?:Nome\s+(?:do\s+)?)?Remetente\s*[:=|]\s*([^\n|;]+)/i
   ]).toUpperCase();
   const rawCepRem = extractFirstMatch(poSection, [
     /CEP\s+(?:do\s+)?Remetente\s*[:=|]\s*([0-9.\-]+)/i
@@ -295,10 +337,10 @@ function parseSroContent(rawInput, expectedTrackingCode) {
   ]) || (remIndex >= 0 ? extractFirstMatch(remBlock, [
     /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
     /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-    /N[º°]\s*[:=|]?\s*([^\n,;|]+)/i
+    /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i
   ]) : "");
   const destinatarioNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+do\s+)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i
+    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i
   ]).toUpperCase();
   const rawCepDest = extractFirstMatch(poSection, [
     /CEP\s+(?:do\s+)?Destinat[áa]rio\s*[:=|]\s*([0-9.\-]+)/i
@@ -309,7 +351,7 @@ function parseSroContent(rawInput, expectedTrackingCode) {
   ]) || (destIndex >= 0 ? extractFirstMatch(destBlock, [
     /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
     /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-    /N[º°]\s*[:=|]?\s*([^\n,;|]+)/i
+    /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i
   ]) : "");
   return {
     ok: true,
@@ -564,7 +606,59 @@ async function executeSroQueryInner(cleanCode, requestId, queryState) {
         message: "Tempo esgotado ao carregar o SRO Intranet. Verifique a conex\xE3o na rede corporativa."
       };
     }
-    const domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
+    const existingSroTabsBefore = await chrome.tabs.query({ url: `${SRO_INTRANET_ORIGIN}/*` }).catch(() => []);
+    const existingIdsBefore = new Set(
+      existingSroTabsBefore.map((t) => t.id).filter((id) => typeof id === "number")
+    );
+    let openedPopupTabId = null;
+    const onPopupCreated = (newTab) => {
+      if (newTab && typeof newTab.id === "number" && newTab.id !== tab.id && (newTab.openerTabId === tab.id || !existingIdsBefore.has(newTab.id))) {
+        openedPopupTabId = newTab.id;
+      }
+    };
+    chrome.tabs.onCreated?.addListener(onPopupCreated);
+    let domRes;
+    let usedPopupTabId = null;
+    try {
+      domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
+      if (domRes && !domRes.authRequired && !domRes.notFound && !domRes.hasPoDetail) {
+        if (openedPopupTabId === null) {
+          await new Promise((r) => setTimeout(r, 250));
+          const tabsAfter = await chrome.tabs.query({ url: `${SRO_INTRANET_ORIGIN}/*` }).catch(() => []);
+          const extraTab = tabsAfter.find(
+            (t) => typeof t.id === "number" && !existingIdsBefore.has(t.id)
+          );
+          if (extraTab && typeof extraTab.id === "number") {
+            openedPopupTabId = extraTab.id;
+          }
+        }
+        if (openedPopupTabId !== null && !queryState.cancelled) {
+          usedPopupTabId = openedPopupTabId;
+          const popupLoad = await waitForTabReady(openedPopupTabId, queryState, 8e3, false);
+          if (popupLoad.redirectedToAuth) {
+            domRes = { ok: false, authRequired: true };
+          } else if (popupLoad.ready) {
+            const popupDom = await sendExtractDomWithRetry(
+              openedPopupTabId,
+              cleanCode,
+              requestId,
+              queryState
+            );
+            if (popupDom && (popupDom.hasPoDetail || popupDom.authRequired)) {
+              domRes = popupDom;
+            }
+          }
+        }
+      }
+    } finally {
+      chrome.tabs.onCreated?.removeListener(onPopupCreated);
+      if (usedPopupTabId !== null) {
+        try {
+          await chrome.tabs.remove?.(usedPopupTabId);
+        } catch {
+        }
+      }
+    }
     if (queryState.cancelled) {
       return {
         ok: false,
@@ -595,7 +689,8 @@ async function executeSroQueryInner(cleanCode, requestId, queryState) {
         message: "Sess\xE3o do SRO Intranet expirada. Autentique-se na aba do SRO e consulte novamente."
       };
     }
-    if (!domRes.notFound && !domRes.hasTrackingMatch) {
+    const allowPopupDetailWithoutCode = usedPopupTabId !== null && Boolean(domRes.hasPoDetail);
+    if (!domRes.notFound && !domRes.hasTrackingMatch && !allowPopupDetailWithoutCode) {
       let diagnostic = "A aba do SRO Intranet abriu, mas o resultado do objeto n\xE3o carregou automaticamente na tela.";
       if (domRes.inputFound === false) {
         diagnostic = "A aba do SRO Intranet abriu, mas o campo de pesquisa n\xE3o foi localizado automaticamente na tela.";
@@ -614,13 +709,14 @@ async function executeSroQueryInner(cleanCode, requestId, queryState) {
     const rawContent = domRes.html || domRes.text || "";
     const parsed = parseSroContent(rawContent, cleanCode);
     if (!parsed.ok || !parsed.data) {
+      const extraHint = domRes.postadoRowFound && !domRes.hasPoDetail ? ' A linha "Postado" apareceu na tabela, mas a guia/detalhe do evento n\xE3o abriu automaticamente.' : "";
       return {
         ok: false,
         requestId,
         trackingCode: cleanCode,
         extensionVersion: EXTENSION_VERSION,
         errorCode: parsed.errorCode || "PARSE_ERROR",
-        message: parsed.message || "N\xE3o foi poss\xEDvel localizar o evento Postagem (PO) para este objeto no SRO."
+        message: (parsed.message || "N\xE3o foi poss\xEDvel localizar o evento Postagem (PO) para este objeto no SRO.") + extraHint
       };
     }
     if (normalizeTrackingCode(parsed.data.codigoRastreamento) !== cleanCode) {

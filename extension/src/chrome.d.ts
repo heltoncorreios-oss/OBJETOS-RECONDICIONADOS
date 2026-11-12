@@ -35,6 +35,7 @@ declare namespace chrome {
       status?: string;
       active?: boolean;
       windowId?: number;
+      openerTabId?: number;
     }
 
     function query(queryInfo: { url?: string | string[] }): Promise<Tab[]>;
@@ -44,7 +45,13 @@ declare namespace chrome {
       tabId: number,
       updateProperties: { url?: string; active?: boolean }
     ): Promise<Tab>;
+    function remove(tabIds: number | number[]): Promise<void>;
     function sendMessage<T = any, R = any>(tabId: number, message: T): Promise<R>;
+
+    const onCreated: {
+      addListener(callback: (tab: Tab) => void): void;
+      removeListener(callback: (tab: Tab) => void): void;
+    };
 
     const onUpdated: {
       addListener(

@@ -120,6 +120,14 @@ export function parseValorDeclarado(rawVd: string | null | undefined): 'SIM' | '
   ) {
     return 'NÃO';
   }
+
+  const moneyMatch = cleaned.match(/R\$\s*(\d+(?:[.,]\d+)?)/i);
+  if (moneyMatch) {
+    const val = parseFloat(moneyMatch[1].replace('.', '').replace(',', '.'));
+    if (Number.isFinite(val)) {
+      return val > 0 ? 'SIM' : 'NÃO';
+    }
+  }
   return '';
 }
 
@@ -183,36 +191,75 @@ export function htmlToReadableText(raw: string): string {
     .trim();
 }
 
+function hasPoDetailSignals(text: string): boolean {
+  const hasRemAndDest = /\bRemetente\b/i.test(text) && /\bDestinat[áa]rio\b/i.test(text);
+  const hasDetailMetric = /\b(?:Peso|VD|Valor\s+Declarado|CEP)\b/i.test(text);
+  return hasRemAndDest && hasDetailMetric;
+}
+
 /**
  * Isola especificamente o bloco do evento Postagem (PO) no texto extraído do SRO.
  */
 function isolatePostagemSection(fullText: string): string | null {
   const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Padrões que identificam especificamente o evento Postagem (PO)
+  // Padrões que identificam especificamente o evento Postagem (PO) ou detalhe da guia "Postado"
   const poStartRegex =
-    /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b)/i;
+    /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\s*(?:\(\s*PO\s*\))?\s*$)/i;
 
   // Padrões que indicam o início de OUTRO evento posterior/anterior no histórico do SRO
-  const otherEventHeaderRegex =
-    /^(?:\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}|(?:BDE|BDI|BDR|BLQ|CAR|CD|CMT|CO|CUN|DO|EST|FC|IDC|LDI|OEC|PAR|PMT|RO|TR)\s*[-–:]|\b(?:Entregue|Saiu para entrega|Objeto encaminhado|Objeto recebido|Objeto em transfer[êe]ncia)\b)/i;
+  const explicitOtherEventRegex =
+    /(?:^(?:BDE|BDI|BDR|BLQ|CAR|CD|CMT|CO|CUN|DO|EST|FC|IDC|LDI|OEC|PAR|PMT|RO|TR)\s*[-–:]|\b(?:Entregue|Saiu para entrega|Objeto encaminhado|Objeto recebido|Objeto em transfer[êe]ncia|Aguardando retirada|Objeto\/unitizador expedido|Objeto\/unitizador desembarcado|Objeto\/unitizador embarcado|Passagem interna|Etiqueta emitida|Aguardando postagem)\b)/i;
 
-  const startIdx = lines.findIndex(line => poStartRegex.test(line));
-  if (startIdx === -1) {
+  const candidateIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (poStartRegex.test(line) && !/aguardando\s+postagem/i.test(line)) {
+      candidateIndices.push(i);
+    }
+  }
+
+  if (candidateIndices.length === 0) {
+    // Fallback: se o conteúdo veio diretamente de uma aba/modal exclusivo de detalhe do evento PO
+    if (hasPoDetailSignals(fullText) && /\b(?:Postado|Postagem|\bPO\b)\b/i.test(fullText)) {
+      return lines.join('\n');
+    }
     return null;
   }
 
-  // Coletar a partir do evento PO até encontrar claramente outro evento distinto (se houver tabela de histórico misturada)
-  const collected: string[] = [];
-  for (let i = startIdx; i < lines.length; i++) {
-    const line = lines[i];
-    if (i > startIdx && otherEventHeaderRegex.test(line) && !poStartRegex.test(line)) {
-      break;
+  let bestBlock = '';
+  for (const startIdx of candidateIndices) {
+    const collected: string[] = [];
+    let sawRemDest = false;
+
+    for (let i = startIdx; i < lines.length; i++) {
+      const line = lines[i];
+      if (i > startIdx) {
+        if (explicitOtherEventRegex.test(line) && !poStartRegex.test(line)) {
+          break;
+        }
+        // Só quebra em linha de data/hora se já coletamos os dados do bloco PO (evita cortar antes de Remetente/Destinatário no card de detalhe)
+        if (sawRemDest && /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(line)) {
+          break;
+        }
+      }
+      collected.push(line);
+      const joinedNow = collected.join('\n');
+      if (/\bRemetente\b/i.test(joinedNow) && /\bDestinat[áa]rio\b/i.test(joinedNow)) {
+        sawRemDest = true;
+      }
     }
-    collected.push(line);
+
+    const candidateText = collected.join('\n');
+    if (hasPoDetailSignals(candidateText)) {
+      return candidateText;
+    }
+    if (!bestBlock) {
+      bestBlock = candidateText;
+    }
   }
 
-  return collected.join('\n');
+  return bestBlock || null;
 }
 
 function cleanFieldValue(val: string | undefined | null): string {
@@ -406,7 +453,7 @@ export function parseSroContent(
 
   // 1. Peso
   const rawPeso = extractFirstMatch(poSection, [
-    /Peso(?:\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Peso(?:\s+Informado|\s+Tarifado|\s*\(\s*kg\s*\)|\s*\(\s*g\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
     /\b(\d+[.,]\d{1,3}\s*kg)\b/i,
     /\b(\d+\s*(?:g|gs))\b/i,
   ]);
@@ -415,18 +462,19 @@ export function parseSroContent(
   // 2. Indicador VD
   const rawVd = extractFirstMatch(poSection, [
     /(?:Indicador\s+)?VD\s*[:=|]\s*([A-Za-zÃã]+)\b/i,
-    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([A-Za-zÃã]+)\b/i,
+    /Valor\s+Declarado(?:\s*\(\s*VD\s*\))?\s*[:=|]\s*([^\n|;]+)/i,
   ]);
   const valorDeclarado = parseValorDeclarado(rawVd);
 
   // 3. Unidade de postagem
   const unidadePostagem = extractFirstMatch(poSection, [
-    /Unidade(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i,
+    /Unidade(?:\s+(?:de\s+Postagem|Origem))?\s*[:=|]\s*([^\n|;]+)/i,
+    /Local(?:\s+de\s+Postagem)?\s*[:=|]\s*([^\n|;]+)/i,
   ]).toUpperCase();
 
   // 4. Remetente
   const remetenteNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+do\s+)?Remetente\s*[:=|]\s*([^\n|;]+)/i,
+    /(?:Nome\s+(?:do\s+)?)?Remetente\s*[:=|]\s*([^\n|;]+)/i,
   ]).toUpperCase();
 
   const rawCepRem =
@@ -446,13 +494,13 @@ export function parseSroContent(
       ? extractFirstMatch(remBlock, [
           /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
           /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-          /N[º°]\s*[:=|]?\s*([^\n,;|]+)/i,
+          /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i,
         ])
       : '');
 
   // 5. Destinatário
   const destinatarioNome = extractFirstMatch(poSection, [
-    /(?:Nome\s+do\s+)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i,
+    /(?:Nome\s+(?:do\s+)?)?Destinat[áa]rio\s*[:=|]\s*([^\n|;]+)/i,
   ]).toUpperCase();
 
   const rawCepDest =
@@ -472,7 +520,7 @@ export function parseSroContent(
       ? extractFirstMatch(destBlock, [
           /N[úu]mero\s+Logradouro\s*[:=|]\s*([^\n,;|]+)/i,
           /N[úu]mero\s*[:=|]\s*([^\n,;|]+)/i,
-          /N[º°]\s*[:=|]?\s*([^\n,;|]+)/i,
+          /(?:N[º°]|Nro|Nr\.?)\s*[:=|]?\s*([^\n,;|]+)/i,
         ])
       : '');
 

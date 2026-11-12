@@ -25,6 +25,9 @@ interface ExtractDomResponse {
   notFound?: boolean;
   hasTrackingMatch?: boolean;
   hasPostagemHint?: boolean;
+  hasPoDetail?: boolean;
+  postadoRowFound?: boolean;
+  postadoDetailTriggered?: boolean;
   inputFound?: boolean;
   searchTriggered?: boolean;
   text: string;
@@ -49,19 +52,65 @@ function isObjectNotFoundText(text: string): boolean {
 }
 
 function hasPostagemHint(text: string): boolean {
-  return /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]|\bobjeto\s+postad[oa]\b)/i.test(
+  return /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]|\bobjeto\s+postad[oa]\b|\bpostad[oa]\b)/i.test(
     text
   );
+}
+
+function hasPoDetailFields(text: string): boolean {
+  if (!text) return false;
+  const hasRemetente = /\bRemetente\b/i.test(text);
+  const hasDestinatario = /\bDestinat[áa]rio\b/i.test(text);
+  const hasMetric = /\b(?:Peso|VD|Valor\s+Declarado|CEP)\b/i.test(text);
+  return hasRemetente && hasDestinatario && hasMetric;
 }
 
 function normalizeCodeUpper(code: string): string {
   return (code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+function getAccessibleDocuments(): Document[] {
+  const docs: Document[] = [];
+  const frames = Array.from(document.querySelectorAll('iframe, frame'));
+  // Colocar iframes same-origin antes do documento principal para priorizar conteúdo de modais/guias abertos
+  for (const frame of frames) {
+    try {
+      const f = frame as HTMLIFrameElement;
+      const doc = f.contentDocument || f.contentWindow?.document;
+      if (doc && doc.body && (doc.body.innerText || '').trim()) {
+        docs.push(doc);
+      }
+    } catch {
+      // Ignorar iframes cross-origin
+    }
+  }
+  docs.push(document);
+  return docs;
+}
+
+function collectCombinedContent(): { text: string; html: string } {
+  const docs = getAccessibleDocuments();
+  const texts: string[] = [];
+  const htmls: string[] = [];
+
+  for (const doc of docs) {
+    const t = doc.body?.innerText || '';
+    const h = doc.body?.innerHTML || '';
+    if (t.trim()) texts.push(t);
+    if (h.trim()) htmls.push(h);
+  }
+
+  return {
+    text: texts.join('\n\n'),
+    html: htmls.join('\n'),
+  };
+}
+
 type TrackingInputElement = HTMLInputElement | HTMLTextAreaElement;
 
 function isElementVisible(el: HTMLElement): boolean {
-  const style = window.getComputedStyle(el);
+  const win = el.ownerDocument?.defaultView || window;
+  const style = win.getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
     return false;
   }
@@ -205,12 +254,75 @@ function triggerInputAndSearch(trackingCode: string): {
   return { inputFound: true, searchTriggered: true };
 }
 
+/**
+ * Localiza a guia ou linha "Postado" na tabela de histórico do SRO e encontra o botão/ícone "Det".
+ */
+function findPostadoTrigger(): HTMLElement | null {
+  const docs = getAccessibleDocuments();
+
+  for (const doc of docs) {
+    // 1. Caso haja uma guia/aba explícita chamada "Postado" ou "Postagem (PO)"
+    const tabCandidates = Array.from(
+      doc.querySelectorAll('[role="tab"], .nav-link, .tab, .ui-tabs-anchor, a, button')
+    );
+    for (const el of tabCandidates) {
+      if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
+      const label = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (/^(?:postad[oa]|postagem\s*\(\s*po\s*\)|guia\s+postad[oa])$/i.test(label)) {
+        return el;
+      }
+    }
+
+    // 2. Na tabela clássica do SRO (Det | Data Hora | Local | Situação | Nº evt), localizar a linha "Postado"
+    const rows = Array.from(doc.querySelectorAll('tr, [role="row"]'));
+    for (const row of rows) {
+      if (!(row instanceof HTMLElement) || !isElementVisible(row)) continue;
+      const rowText = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
+      if (/aguardando\s+postagem/i.test(rowText)) continue;
+
+      const cells = Array.from(row.querySelectorAll('td, th, [role="cell"]'));
+      const isPostadoRow =
+        cells.some((cell) => {
+          const cellText = (cell.textContent || '').replace(/\s+/g, ' ').trim();
+          return /^(?:postad[oa]|postagem\s*\(\s*po\s*\)|objeto\s+postad[oa])$/i.test(cellText);
+        }) || /\bpostad[oa]\b/i.test(rowText);
+
+      if (!isPostadoRow) continue;
+
+      // Prioridade 1: ícone/link/botão clicável na primeira célula (coluna Det)
+      const firstCell = cells[0];
+      if (firstCell) {
+        const detLink = firstCell.querySelector(
+          'a, button, input[type="button"], input[type="image"], [onclick], [ng-click]'
+        );
+        if (detLink instanceof HTMLElement) return detLink;
+
+        const detIcon = firstCell.querySelector('img, svg, i, span');
+        if (detIcon instanceof HTMLElement) return detIcon;
+
+        if (firstCell instanceof HTMLElement) return firstCell;
+      }
+
+      // Prioridade 2: qualquer link/botão clicável na linha
+      const rowAction = row.querySelector(
+        'a, button, input[type="button"], input[type="image"], [onclick], [ng-click], img'
+      );
+      if (rowAction instanceof HTMLElement) return rowAction;
+
+      return row;
+    }
+  }
+
+  return null;
+}
+
 function waitForInitialMount(trackingCode: string, timeoutMs: number): Promise<void> {
   const cleanCode = normalizeCodeUpper(trackingCode);
   const readyNow = () => {
-    const text = document.body?.innerText || '';
+    const { text } = collectCombinedContent();
     if (isLoginOrAuthScreen(text) || isObjectNotFoundText(text)) return true;
-    if (text.toUpperCase().includes(cleanCode) && hasPostagemHint(text)) return true;
+    if (hasPoDetailFields(text)) return true;
+    if (text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null) return true;
     if (findTrackingInput() !== null) return true;
     return false;
   };
@@ -246,28 +358,25 @@ function waitForInitialMount(trackingCode: string, timeoutMs: number): Promise<v
   });
 }
 
-function waitForRenderedSroDom(
+function waitForSummaryOrPoDetail(
   trackingCode: string,
   timeoutMs: number
 ): Promise<{ settled: boolean }> {
   const cleanCode = normalizeCodeUpper(trackingCode);
 
   const isDomReady = () => {
-    const text = document.body?.innerText || '';
+    const { text } = collectCombinedContent();
     if (!text.trim()) return false;
     if (isLoginOrAuthScreen(text)) return true;
     if (isObjectNotFoundText(text)) return true;
 
-    const upperText = text.toUpperCase();
     const loadingBusy = Boolean(
       document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
     );
     if (loadingBusy) return false;
 
-    if (
-      upperText.includes(cleanCode) &&
-      (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text))
-    ) {
+    if (hasPoDetailFields(text)) return true;
+    if (text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null) {
       return true;
     }
     return false;
@@ -294,7 +403,7 @@ function waitForRenderedSroDom(
 
     observer = new MutationObserver(() => {
       if (isDomReady()) {
-        setTimeout(() => finish(true), 200);
+        setTimeout(() => finish(true), 150);
       }
     });
 
@@ -310,7 +419,57 @@ function waitForRenderedSroDom(
       if (isDomReady()) {
         finish(true);
       }
-    }, 300);
+    }, 250);
+
+    timer = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+function waitForPoDetailDom(timeoutMs: number): Promise<boolean> {
+  const readyNow = () => {
+    const { text } = collectCombinedContent();
+    if (isLoginOrAuthScreen(text)) return true;
+    const loadingBusy = Boolean(
+      document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
+    );
+    if (loadingBusy) return false;
+    return hasPoDetailFields(text);
+  };
+
+  if (readyNow()) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let finished = false;
+    let observer: MutationObserver | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const finish = (ok: boolean) => {
+      if (finished) return;
+      finished = true;
+      observer?.disconnect();
+      if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
+      resolve(ok);
+    };
+
+    observer = new MutationObserver(() => {
+      if (readyNow()) {
+        setTimeout(() => finish(true), 150);
+      }
+    });
+
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+
+    poll = setInterval(() => {
+      if (readyNow()) finish(true);
+    }, 250);
 
     timer = setTimeout(() => finish(false), timeoutMs);
   });
@@ -334,15 +493,15 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
   // Aguarda hidratação inicial caso a página seja SPA
   await waitForInitialMount(cleanCode, 2000);
 
-  let text = document.body?.innerText || '';
+  let combined = collectCombinedContent();
 
-  if (isLoginOrAuthScreen(text)) {
+  if (isLoginOrAuthScreen(combined.text)) {
     return {
       ok: false,
       requestId: msg.requestId,
       trackingCode: cleanCode,
       authRequired: true,
-      text,
+      text: combined.text,
       html: '',
       url: window.location.href,
     };
@@ -350,26 +509,44 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
 
   let inputFound = false;
   let searchTriggered = false;
-  const upperInitial = text.toUpperCase();
-  const alreadyHasResults =
-    upperInitial.includes(cleanCode) &&
-    (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text));
+  let postadoRowFound = false;
+  let postadoDetailTriggered = false;
 
-  if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+  const hasTableOrDetailNow =
+    hasPoDetailFields(combined.text) ||
+    (combined.text.toUpperCase().includes(cleanCode) && findPostadoTrigger() !== null);
+
+  if (!hasTableOrDetailNow && !isObjectNotFoundText(combined.text)) {
     const triggerRes = triggerInputAndSearch(cleanCode);
     inputFound = triggerRes.inputFound;
     searchTriggered = triggerRes.searchTriggered;
+
+    await waitForSummaryOrPoDetail(cleanCode, searchTriggered ? 6500 : 800);
+    combined = collectCombinedContent();
   }
 
-  if (!alreadyHasResults && !isObjectNotFoundText(text)) {
-    await waitForRenderedSroDom(cleanCode, searchTriggered ? 7000 : 800);
+  // Se exibiu a tabela de histórico com a linha "Postado" mas os detalhes do PO ainda estão fechados, clicar no ícone Det / guia Postado
+  if (
+    !isLoginOrAuthScreen(combined.text) &&
+    !isObjectNotFoundText(combined.text) &&
+    !hasPoDetailFields(combined.text)
+  ) {
+    const postadoTrigger = findPostadoTrigger();
+    if (postadoTrigger) {
+      postadoRowFound = true;
+      postadoTrigger.click();
+      postadoDetailTriggered = true;
+      await waitForPoDetailDom(4000);
+      combined = collectCombinedContent();
+    }
   }
 
-  text = document.body?.innerText || '';
-  const html = document.body?.innerHTML || '';
+  const text = combined.text;
+  const html = combined.html;
   const authRequired = isLoginOrAuthScreen(text);
   const notFound = isObjectNotFoundText(text);
   const hasTrackingMatch = text.toUpperCase().includes(cleanCode);
+  const hasPoDetail = hasPoDetailFields(text);
 
   return {
     ok: !authRequired,
@@ -379,6 +556,9 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
     notFound,
     hasTrackingMatch,
     hasPostagemHint: hasPostagemHint(text),
+    hasPoDetail,
+    postadoRowFound,
+    postadoDetailTriggered,
     inputFound,
     searchTriggered,
     text,
