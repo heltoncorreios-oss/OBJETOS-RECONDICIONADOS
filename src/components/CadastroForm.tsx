@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Package, 
   Save, 
@@ -8,7 +8,13 @@ import {
   ClipboardList, 
   ShieldCheck, 
   Building2,
-  Trash2
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  ExternalLink,
+  RefreshCw,
+  ClipboardPaste,
+  Settings2
 } from 'lucide-react';
 import { ObjetoRecord, UnitSettings, ProvidenciaTipo } from '../types';
 import { 
@@ -18,6 +24,37 @@ import {
   saveRecord 
 } from '../services/storage';
 import { CORREIOS_LOGO_SRC } from '../assets/correiosLogo';
+import {
+  isValidTrackingCode,
+  normalizeTrackingCode,
+} from '../services/sroParser';
+import {
+  consultarObjetoSroEContatos,
+  getConfiguredSroAgentUrl,
+  processarConteudoSroReal,
+  setConfiguredSroAgentUrl,
+  SRO_INTRANET_URL,
+  SroAutoFillData,
+  SroConsultationResult,
+} from '../services/sroService';
+
+type MappedAutoField =
+  | 'pesoPostalGramas'
+  | 'valorDeclaradoTexto'
+  | 'unidadeDestinoCodigo'
+  | 'unidadePostagem'
+  | 'remetenteNome'
+  | 'remetenteEndereco'
+  | 'destinatarioNome'
+  | 'destinatarioEndereco';
+
+interface SroUiStatus {
+  phase: 'idle' | 'loading' | 'success' | 'warning' | 'error';
+  message: string;
+  technicalDetail?: string;
+  errorCode?: SroConsultationResult['errorCode'];
+  avisos?: string[];
+}
 
 interface CadastroFormProps {
   settings: UnitSettings;
@@ -96,9 +133,255 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Automação SRO + Busca CEP
+  const [sroStatus, setSroStatus] = useState<SroUiStatus>({ phase: 'idle', message: '' });
+  const [sroPasteContent, setSroPasteContent] = useState<string>('');
+  const [showAgentConfig, setShowAgentConfig] = useState<boolean>(false);
+  const [sroAgentUrlInput, setSroAgentUrlInput] = useState<string>(() => getConfiguredSroAgentUrl());
+
+  const manualFieldsRef = useRef<Set<MappedAutoField>>(new Set());
+  const autoFilledFieldsRef = useRef<Set<MappedAutoField>>(new Set());
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const querySeqRef = useRef<number>(0);
+  const inFlightCodeRef = useRef<string>('');
+  const lastCompletedCodeRef = useRef<string>('');
+  const loadedEditingCodeRef = useRef<string>(
+    editingRecord ? normalizeTrackingCode(editingRecord.codigoRastreamento) : ''
+  );
+
+  const markManualField = (field: MappedAutoField) => {
+    manualFieldsRef.current.add(field);
+    autoFilledFieldsRef.current.delete(field);
+  };
+
+  // Limpa apenas campos preenchidos automaticamente por consulta anterior, preservando edições manuais
+  const resetAutoFilledFields = useCallback(() => {
+    const autoSet = autoFilledFieldsRef.current;
+    if (autoSet.size === 0) return;
+
+    if (autoSet.has('pesoPostalGramas') && !manualFieldsRef.current.has('pesoPostalGramas')) {
+      setPesoPostalGramas('');
+    }
+    if (autoSet.has('valorDeclaradoTexto') && !manualFieldsRef.current.has('valorDeclaradoTexto')) {
+      setValorDeclaradoTexto('NC');
+    }
+    if (autoSet.has('unidadeDestinoCodigo') && !manualFieldsRef.current.has('unidadeDestinoCodigo')) {
+      setUnidadeDestinoCodigo(settings.destinoPadrao || '18650065');
+    }
+    if (autoSet.has('unidadePostagem') && !manualFieldsRef.current.has('unidadePostagem')) {
+      setUnidadePostagem('');
+    }
+    if (autoSet.has('remetenteNome') && !manualFieldsRef.current.has('remetenteNome')) {
+      setRemetenteNome('');
+    }
+    if (autoSet.has('remetenteEndereco') && !manualFieldsRef.current.has('remetenteEndereco')) {
+      setRemetenteEndereco('');
+    }
+    if (autoSet.has('destinatarioNome') && !manualFieldsRef.current.has('destinatarioNome')) {
+      setDestinatarioNome('');
+    }
+    if (autoSet.has('destinatarioEndereco') && !manualFieldsRef.current.has('destinatarioEndereco')) {
+      setDestinatarioEndereco('');
+    }
+
+    autoFilledFieldsRef.current.clear();
+  }, [settings.destinoPadrao]);
+
+  const applySroAutoFill = useCallback((data: SroAutoFillData) => {
+    const applied = new Set<MappedAutoField>();
+
+    if (!manualFieldsRef.current.has('pesoPostalGramas')) {
+      setPesoPostalGramas(data.pesoPostalGramas !== null ? data.pesoPostalGramas : '');
+      applied.add('pesoPostalGramas');
+    }
+
+    if (!manualFieldsRef.current.has('valorDeclaradoTexto')) {
+      setValorDeclaradoTexto(data.valorDeclarado);
+      applied.add('valorDeclaradoTexto');
+    }
+
+    if (!manualFieldsRef.current.has('unidadeDestinoCodigo')) {
+      setUnidadeDestinoCodigo(data.destinoCep || '');
+      applied.add('unidadeDestinoCodigo');
+    }
+
+    if (!manualFieldsRef.current.has('unidadePostagem')) {
+      setUnidadePostagem(data.unidadePostagem || '');
+      applied.add('unidadePostagem');
+    }
+
+    if (!manualFieldsRef.current.has('remetenteNome')) {
+      setRemetenteNome(data.remetenteNome || '');
+      applied.add('remetenteNome');
+    }
+
+    if (!manualFieldsRef.current.has('remetenteEndereco')) {
+      setRemetenteEndereco(data.remetenteEndereco || '');
+      applied.add('remetenteEndereco');
+    }
+
+    if (!manualFieldsRef.current.has('destinatarioNome')) {
+      setDestinatarioNome(data.destinatarioNome || '');
+      applied.add('destinatarioNome');
+    }
+
+    if (!manualFieldsRef.current.has('destinatarioEndereco')) {
+      setDestinatarioEndereco(data.destinatarioEndereco || '');
+      applied.add('destinatarioEndereco');
+    }
+
+    // ATENÇÃO: pesoRealGramas nunca é preenchido automaticamente
+    autoFilledFieldsRef.current = applied;
+  }, []);
+
+  const handleConsultationOutcome = useCallback(
+    (code: string, result: SroConsultationResult, seq: number) => {
+      if (seq !== querySeqRef.current) return;
+      inFlightCodeRef.current = '';
+
+      if (!result.ok || !result.data) {
+        resetAutoFilledFields();
+        setSroStatus({
+          phase: 'error',
+          message: result.stageMessage,
+          technicalDetail: result.technicalDetail,
+          errorCode: result.errorCode,
+        });
+        return;
+      }
+
+      if (normalizeTrackingCode(result.data.codigoRastreamento) !== code) {
+        resetAutoFilledFields();
+        setSroStatus({
+          phase: 'error',
+          message: 'Os dados obtidos não pertencem ao código informado e foram descartados.',
+          errorCode: 'OBJECT_NOT_FOUND',
+        });
+        return;
+      }
+
+      applySroAutoFill(result.data);
+      lastCompletedCodeRef.current = code;
+
+      setSroStatus({
+        phase: result.data.avisos.length > 0 ? 'warning' : 'success',
+        message: result.stageMessage,
+        avisos: result.data.avisos,
+      });
+    },
+    [applySroAutoFill, resetAutoFilledFields]
+  );
+
+  const startSroLookup = useCallback(
+    async (rawCode: string, force = false) => {
+      const cleanCode = normalizeTrackingCode(rawCode);
+      if (!isValidTrackingCode(cleanCode)) return;
+
+      if (!force && inFlightCodeRef.current === cleanCode) return;
+      if (!force && lastCompletedCodeRef.current === cleanCode) return;
+
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const seq = ++querySeqRef.current;
+      inFlightCodeRef.current = cleanCode;
+      resetAutoFilledFields();
+      setSroPasteContent('');
+
+      setSroStatus({
+        phase: 'loading',
+        message: 'Consultando objeto no SRO dos Correios...',
+      });
+
+      try {
+        const result = await consultarObjetoSroEContatos(
+          cleanCode,
+          {
+            onStatusChange: (msg) => {
+              if (seq === querySeqRef.current) {
+                setSroStatus({ phase: 'loading', message: msg });
+              }
+            },
+          },
+          controller.signal
+        );
+        handleConsultationOutcome(cleanCode, result, seq);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        if (seq === querySeqRef.current) {
+          inFlightCodeRef.current = '';
+          resetAutoFilledFields();
+          setSroStatus({
+            phase: 'error',
+            message: 'Falha inesperada ao consultar o SRO dos Correios.',
+            errorCode: 'INTRANET_UNREACHABLE',
+          });
+        }
+      }
+    },
+    [handleConsultationOutcome, resetAutoFilledFields]
+  );
+
+  const processPastedOrRelayedSro = useCallback(
+    async (rawContent: string | Record<string, any>) => {
+      const cleanCode = normalizeTrackingCode(codigoRastreamento);
+      if (!isValidTrackingCode(cleanCode) || !rawContent) return;
+
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const seq = ++querySeqRef.current;
+      inFlightCodeRef.current = cleanCode;
+
+      setSroStatus({
+        phase: 'loading',
+        message: 'Consultando objeto no SRO dos Correios...',
+      });
+
+      try {
+        const result = await processarConteudoSroReal(
+          rawContent as any,
+          cleanCode,
+          {
+            onStatusChange: (msg) => {
+              if (seq === querySeqRef.current) {
+                setSroStatus({ phase: 'loading', message: msg });
+              }
+            },
+          },
+          controller.signal
+        );
+        handleConsultationOutcome(cleanCode, result, seq);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        if (seq === querySeqRef.current) {
+          inFlightCodeRef.current = '';
+          resetAutoFilledFields();
+          setSroStatus({
+            phase: 'error',
+            message: 'Falha ao processar os dados recebidos do SRO.',
+            errorCode: 'PARSE_ERROR',
+          });
+        }
+      }
+    },
+    [codigoRastreamento, handleConsultationOutcome, resetAutoFilledFields]
+  );
+
   // Inicialização e sincronização com configurações
   useEffect(() => {
+    abortControllerRef.current?.abort();
+    inFlightCodeRef.current = '';
+    lastCompletedCodeRef.current = '';
+    autoFilledFieldsRef.current.clear();
+    manualFieldsRef.current.clear();
+    setSroStatus({ phase: 'idle', message: '' });
+    setSroPasteContent('');
+
     if (editingRecord) {
+      loadedEditingCodeRef.current = normalizeTrackingCode(editingRecord.codigoRastreamento);
       setDataConstatacao(editingRecord.dataConstatacao);
       setDiaDoMes(editingRecord.diaDoMes || parseInt(editingRecord.dataConstatacao.split('-')[2], 10));
       setItemNumero(editingRecord.itemNumero);
@@ -123,6 +406,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
       setProvidenciaTipo(editingRecord.providencias.tipo);
       setOutrasProvidenciasDescricao(editingRecord.providencias.outrasDescricao || '');
     } else {
+      loadedEditingCodeRef.current = '';
       // Para novo cadastro, puxa diretamente a sequência configurada nas configurações
       const nextTermo = calculateNextTermoNumber(dataConstatacao, settings);
       setTermoNumero(nextTermo.numeroFormatado);
@@ -130,6 +414,80 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
       setItemNumero(nextItem);
     }
   }, [editingRecord?.id]);
+
+  // Cancelar requisição pendente ao desmontar
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Ouvir ponte em tempo real (postMessage / BroadcastChannel) caso uma aba/extensão autenticada envie dados do SRO
+  useEffect(() => {
+    const handleBridgePayload = (payload: any) => {
+      if (!payload || payload.type !== 'CORREIOS_SRO_DATA') return;
+      const content = payload.payload ?? payload.content ?? payload.html ?? payload.text;
+      if (content) {
+        void processPastedOrRelayedSro(content);
+      }
+    };
+
+    const onWindowMessage = (event: MessageEvent) => {
+      handleBridgePayload(event.data);
+    };
+    window.addEventListener('message', onWindowMessage);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel = new BroadcastChannel('correios_sro_bridge');
+      channel.onmessage = (ev) => handleBridgePayload(ev.data);
+    }
+
+    return () => {
+      window.removeEventListener('message', onWindowMessage);
+      channel?.close();
+    };
+  }, [processPastedOrRelayedSro]);
+
+  // Gatilho automático ao digitar ou bipar código de rastreamento válido
+  useEffect(() => {
+    const cleanCode = normalizeTrackingCode(codigoRastreamento);
+
+    if (!cleanCode) {
+      abortControllerRef.current?.abort();
+      inFlightCodeRef.current = '';
+      lastCompletedCodeRef.current = '';
+      resetAutoFilledFields();
+      setSroStatus({ phase: 'idle', message: '' });
+      return;
+    }
+
+    // Ao editar registro existente, não reconsulta automaticamente o código original salvo
+    if (editingRecord && cleanCode === loadedEditingCodeRef.current) {
+      return;
+    }
+
+    if (lastCompletedCodeRef.current && lastCompletedCodeRef.current !== cleanCode) {
+      lastCompletedCodeRef.current = '';
+      resetAutoFilledFields();
+      setSroStatus({ phase: 'idle', message: '' });
+    }
+
+    if (inFlightCodeRef.current && inFlightCodeRef.current !== cleanCode) {
+      abortControllerRef.current?.abort();
+      inFlightCodeRef.current = '';
+    }
+
+    if (!isValidTrackingCode(cleanCode)) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void startSroLookup(cleanCode);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [codigoRastreamento, editingRecord, resetAutoFilledFields, startSroLookup]);
 
   useEffect(() => {
     if (dataConstatacao) {
@@ -407,13 +765,165 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             <label className="block text-xs font-bold text-slate-800 mb-1">
               Código de Rastreamento (Número Objeto) *
             </label>
-            <input
-              type="text"
-              placeholder="Ex: Ae047884658br"
-              value={codigoRastreamento}
-              onChange={(e) => setCodigoRastreamento(e.target.value.toUpperCase())}
-              className="w-full px-3 py-2 text-sm font-mono font-bold text-slate-900 border border-slate-300 rounded-lg tracking-wider"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Ex: Ae047884658br"
+                value={codigoRastreamento}
+                onChange={(e) => {
+                  const val = e.target.value.toUpperCase();
+                  setCodigoRastreamento(val);
+                  if (editingRecord && normalizeTrackingCode(val) !== loadedEditingCodeRef.current) {
+                    loadedEditingCodeRef.current = '';
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const clean = normalizeTrackingCode(codigoRastreamento);
+                    if (isValidTrackingCode(clean)) {
+                      void startSroLookup(clean, true);
+                    }
+                  }
+                }}
+                className="flex-1 px-3 py-2 text-sm font-mono font-bold text-slate-900 border border-slate-300 rounded-lg tracking-wider"
+              />
+              {isValidTrackingCode(codigoRastreamento) && (
+                <button
+                  type="button"
+                  onClick={() => void startSroLookup(codigoRastreamento, true)}
+                  disabled={sroStatus.phase === 'loading'}
+                  title="Consultar objeto novamente no SRO"
+                  className="px-3 py-2 text-xs font-bold text-[#00416B] bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {sroStatus.phase === 'loading' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  <span className="hidden sm:inline">Consultar SRO</span>
+                </button>
+              )}
+            </div>
+
+            {sroStatus.phase !== 'idle' && (
+              <div
+                className={`mt-2 p-2.5 rounded-lg border text-xs space-y-2 ${
+                  sroStatus.phase === 'loading'
+                    ? 'bg-sky-50 border-sky-200 text-sky-900'
+                    : sroStatus.phase === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : sroStatus.phase === 'warning'
+                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                    : 'bg-red-50 border-red-200 text-red-900'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {sroStatus.phase === 'loading' && (
+                    <Loader2 className="w-4 h-4 text-[#00416B] animate-spin shrink-0 mt-0.5" />
+                  )}
+                  {sroStatus.phase === 'success' && (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  )}
+                  {(sroStatus.phase === 'warning' || sroStatus.phase === 'error') && (
+                    <AlertCircle
+                      className={`w-4 h-4 shrink-0 mt-0.5 ${
+                        sroStatus.phase === 'warning' ? 'text-amber-600' : 'text-red-600'
+                      }`}
+                    />
+                  )}
+                  <div className="flex-1 space-y-1">
+                    <p className="font-semibold">{sroStatus.message}</p>
+                    {sroStatus.technicalDetail && (
+                      <p className="text-[11px] opacity-90">{sroStatus.technicalDetail}</p>
+                    )}
+                    {sroStatus.avisos && sroStatus.avisos.length > 0 && (
+                      <ul className="list-disc pl-4 text-[11px] space-y-0.5">
+                        {sroStatus.avisos.map((aviso, idx) => (
+                          <li key={idx}>{aviso}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                {(sroStatus.errorCode === 'CORS_BLOCKED' ||
+                  sroStatus.errorCode === 'INTRANET_UNREACHABLE' ||
+                  sroStatus.errorCode === 'AUTH_REQUIRED' ||
+                  sroPasteContent.length > 0) && (
+                  <div className="pt-2 border-t border-red-200/80 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <a
+                        href={`${SRO_INTRANET_URL}?objeto=${encodeURIComponent(
+                          normalizeTrackingCode(codigoRastreamento)
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-red-300 text-[11px] font-bold text-[#00416B] hover:bg-sky-50"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Abrir SRO Intranet na aba autenticada
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setShowAgentConfig((prev) => !prev)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 underline cursor-pointer"
+                      >
+                        <Settings2 className="w-3 h-3" />
+                        Agente local
+                      </button>
+                    </div>
+
+                    {showAgentConfig && (
+                      <div className="p-2 rounded bg-white border border-slate-200 space-y-1.5">
+                        <label className="block text-[11px] font-semibold text-slate-700">
+                          URL do Serviço Auxiliar Local (na rede Correios):
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            placeholder="http://localhost:3000"
+                            value={sroAgentUrlInput}
+                            onChange={(e) => setSroAgentUrlInput(e.target.value)}
+                            className="flex-1 px-2 py-1 text-xs font-mono border border-slate-300 rounded"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfiguredSroAgentUrl(sroAgentUrlInput);
+                              void startSroLookup(codigoRastreamento, true);
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-bold bg-[#00416B] text-white rounded cursor-pointer"
+                          >
+                            Aplicar e Consultar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-800">
+                        <ClipboardPaste className="w-3 h-3 text-[#00416B]" />
+                        Ou cole aqui o conteúdo copiado da tela do SRO (Ctrl+A → Ctrl+C → Ctrl+V) para preencher automaticamente e consultar os CEPs:
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={sroPasteContent}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setSroPasteContent(text);
+                          if (text.trim().length > 20) {
+                            void processPastedOrRelayedSro(text);
+                          }
+                        }}
+                        placeholder="Cole aqui o texto/HTML do evento Postagem (PO) do SRO Intranet..."
+                        className="w-full px-2.5 py-1.5 text-[11px] font-mono bg-white border border-slate-300 rounded text-slate-900"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
         </div>
@@ -429,7 +939,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
               type="number"
               placeholder="Ex: 760 ou 14730"
               value={pesoPostalGramas}
-              onChange={(e) => setPesoPostalGramas(e.target.value === '' ? '' : Number(e.target.value))}
+              onChange={(e) => {
+                markManualField('pesoPostalGramas');
+                setPesoPostalGramas(e.target.value === '' ? '' : Number(e.target.value));
+              }}
               className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg"
             />
           </div>
@@ -454,7 +967,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             <input
               type="text"
               value={valorDeclaradoTexto}
-              onChange={(e) => setValorDeclaradoTexto(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                markManualField('valorDeclaradoTexto');
+                setValorDeclaradoTexto(e.target.value.toUpperCase());
+              }}
               placeholder="NC ou valor"
               className="w-full px-3 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-lg"
             />
@@ -468,7 +984,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             <input
               type="text"
               value={unidadeDestinoCodigo}
-              onChange={(e) => setUnidadeDestinoCodigo(e.target.value)}
+              onChange={(e) => {
+                markManualField('unidadeDestinoCodigo');
+                setUnidadeDestinoCodigo(e.target.value);
+              }}
               placeholder="Ex: 18650065"
               className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg"
             />
@@ -486,14 +1005,20 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             type="text"
             placeholder="Ex: AC PIRAPOZINHO - PIRAPOZINHO / SP"
             value={unidadePostagem}
-            onChange={(e) => setUnidadePostagem(e.target.value.toUpperCase())}
+            onChange={(e) => {
+              markManualField('unidadePostagem');
+              setUnidadePostagem(e.target.value.toUpperCase());
+            }}
             className="w-full px-3 py-2 text-sm font-bold text-slate-800 border border-slate-300 rounded-lg"
           />
           <div className="flex flex-wrap gap-2 mt-1 text-[11px] text-slate-500">
             <span>Sugestões:</span>
             <button 
               type="button" 
-              onClick={() => setUnidadePostagem('AC PIRAPOZINHO - PIRAPOZINHO / SP')}
+              onClick={() => {
+                markManualField('unidadePostagem');
+                setUnidadePostagem('AC PIRAPOZINHO - PIRAPOZINHO / SP');
+              }}
               className="text-[#00416B] underline font-medium cursor-pointer"
             >
               AC Pirapozinho
@@ -501,7 +1026,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             <span>·</span>
             <button 
               type="button" 
-              onClick={() => setUnidadePostagem('AGF ALONSO LOPEZ - CAJAMAR / SP')}
+              onClick={() => {
+                markManualField('unidadePostagem');
+                setUnidadePostagem('AGF ALONSO LOPEZ - CAJAMAR / SP');
+              }}
               className="text-[#00416B] underline font-medium cursor-pointer"
             >
               AGF Alonso Lopez (Cajamar)
@@ -509,7 +1037,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
             <span>·</span>
             <button 
               type="button" 
-              onClick={() => setUnidadePostagem('AGF RIO BRANCO - BAURU / SP')}
+              onClick={() => {
+                markManualField('unidadePostagem');
+                setUnidadePostagem('AGF RIO BRANCO - BAURU / SP');
+              }}
               className="text-[#00416B] underline font-medium cursor-pointer"
             >
               AGF Rio Branco (Bauru)
@@ -539,7 +1070,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                 type="text"
                 placeholder="Ex: SUMETAL IND E COM"
                 value={remetenteNome}
-                onChange={(e) => setRemetenteNome(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  markManualField('remetenteNome');
+                  setRemetenteNome(e.target.value.toUpperCase());
+                }}
                 className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-lg"
               />
             </div>
@@ -551,7 +1085,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                 type="text"
                 placeholder="Ex: RUA GOTARDO PELIN, 206"
                 value={remetenteEndereco}
-                onChange={(e) => setRemetenteEndereco(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  markManualField('remetenteEndereco');
+                  setRemetenteEndereco(e.target.value.toUpperCase());
+                }}
                 className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-lg"
               />
             </div>
@@ -567,7 +1104,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                 type="text"
                 placeholder="Ex: BOA NOVA COMERCIAL"
                 value={destinatarioNome}
-                onChange={(e) => setDestinatarioNome(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  markManualField('destinatarioNome');
+                  setDestinatarioNome(e.target.value.toUpperCase());
+                }}
                 className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-lg"
               />
             </div>
@@ -579,7 +1119,10 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
                 type="text"
                 placeholder="Ex: RUA XV DE NOVEMBRO 792"
                 value={destinatarioEndereco}
-                onChange={(e) => setDestinatarioEndereco(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  markManualField('destinatarioEndereco');
+                  setDestinatarioEndereco(e.target.value.toUpperCase());
+                }}
                 className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-lg"
               />
             </div>

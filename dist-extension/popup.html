@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Correios SRO Bridge (Piloto)</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      width: 310px;
+      margin: 0;
+      padding: 14px;
+      background: #f8fafc;
+      color: #0f172a;
+      font-size: 13px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #00416b;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+    .title {
+      font-weight: 700;
+      color: #00416b;
+      font-size: 14px;
+    }
+    .badge {
+      background: #ffcc00;
+      color: #002d56;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .row {
+      margin-bottom: 6px;
+    }
+    .label {
+      font-size: 11px;
+      color: #475569;
+      display: block;
+    }
+    .value {
+      font-weight: 600;
+      word-break: break-all;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      text-align: center;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      margin-top: 6px;
+      font-size: 12px;
+    }
+    .btn-primary {
+      background: #00416b;
+      color: #ffffff;
+    }
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="title">SRO Bridge (Piloto)</span>
+    <span class="badge" id="ext-version">v1.0.0</span>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="label">Origem Oficial Autorizada:</span>
+      <span class="value" id="official-origin">https://recondicionamentodeobjetos.vercel.app</span>
+    </div>
+    <div class="row">
+      <span class="label">Aba SRO Intranet:</span>
+      <span class="value" id="sro-tab-status">Verificando...</span>
+    </div>
+  </div>
+
+  <button id="open-sro-btn" class="btn btn-primary" type="button">
+    Abrir / Reutilizar SRO Intranet
+  </button>
+  <button id="open-app-btn" class="btn btn-secondary" type="button">
+    Abrir Sistema de Recondicionados
+  </button>
+
+  <script src="popup.js"></script>
+</body>
+</html>

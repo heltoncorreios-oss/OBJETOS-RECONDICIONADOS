@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Correios SRO - Controle de Recondicionados (Piloto)",
+  "version": "1.0.0",
+  "description": "Extensão piloto Chrome/Edge MV3 para consulta autenticada ao SRO Intranet (evento Postagem PO) integrada ao sistema de Controle de Objetos Recondicionados.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://srointranet.correios.com.br/*",
+    "https://recondicionamentodeobjetos.vercel.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://recondicionamentodeobjetos.vercel.app/*"
+      ],
+      "js": [
+        "appBridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://srointranet.correios.com.br/*"
+      ],
+      "js": [
+        "sroContentScript.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "SRO Intranet Bridge (Piloto)",
+    "default_popup": "popup.html"
+  }
+}

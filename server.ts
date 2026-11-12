@@ -25,6 +25,13 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 import { INITIAL_SAMPLE_RECORDS, DEFAULT_SETTINGS } from './src/services/storage';
+import {
+  formatCepDisplay,
+  isValidTrackingCode,
+  normalizeCepDigits,
+  normalizeTrackingCode,
+  parseSroContent,
+} from './src/services/sroParser';
 
 // Helper para gravação atômica segura contra corrupção
 function atomicWriteJson(filePath: string, data: any) {
@@ -217,6 +224,186 @@ app.get('/api/backup', (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao gerar backup', details: err.message });
   }
+});
+
+// ==========================================
+// ROTAS DE CONSULTA REAL AO BUSCA CEP E SRO
+// ==========================================
+
+function applySroCorsHeaders(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const origin = req.headers.origin;
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  if (req.headers['access-control-request-private-network'] === 'true') {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+}
+
+app.use(['/api/sro', '/api/cep'], applySroCorsHeaders);
+
+// Proxy real de consulta de CEP (ViaCEP / BrasilAPI - base DNE Correios)
+app.get('/api/cep/:cep', async (req, res) => {
+  const cep = normalizeCepDigits(req.params.cep);
+  if (!cep) {
+    return res.status(400).json({ ok: false, error: 'CEP inválido. Informe 8 dígitos.' });
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const viaRes = await fetch(`https://viacep.com.br/ws/${cep}/json/`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+
+    if (viaRes.ok) {
+      const viaData: any = await viaRes.json();
+      if (viaData?.erro) {
+        return res.status(404).json({
+          ok: false,
+          cep,
+          error: `CEP ${formatCepDisplay(cep)} não encontrado no Busca CEP.`,
+        });
+      }
+      return res.json({
+        ok: true,
+        cep,
+        data: {
+          cep,
+          cepFormatado: formatCepDisplay(cep),
+          logradouro: (viaData.logradouro || '').trim().toUpperCase(),
+          bairro: (viaData.bairro || '').trim().toUpperCase(),
+          localidade: (viaData.localidade || '').trim().toUpperCase(),
+          uf: (viaData.uf || '').trim().toUpperCase(),
+        },
+      });
+    }
+  } catch {
+    // Segue para fallback BrasilAPI
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const brRes = await fetch(`https://brasilapi.com.br/api/cep/v2/${cep}`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+
+    if (brRes.ok) {
+      const brData: any = await brRes.json();
+      return res.json({
+        ok: true,
+        cep,
+        data: {
+          cep,
+          cepFormatado: formatCepDisplay(cep),
+          logradouro: (brData.street || '').trim().toUpperCase(),
+          bairro: (brData.neighborhood || '').trim().toUpperCase(),
+          localidade: (brData.city || '').trim().toUpperCase(),
+          uf: (brData.state || '').trim().toUpperCase(),
+        },
+      });
+    }
+    if (brRes.status === 404) {
+      return res.status(404).json({
+        ok: false,
+        cep,
+        error: `CEP ${formatCepDisplay(cep)} não encontrado no Busca CEP.`,
+      });
+    }
+  } catch {
+    // Falha de rede
+  }
+
+  return res.status(502).json({
+    ok: false,
+    cep,
+    error: `Não foi possível consultar o serviço Busca CEP para ${formatCepDisplay(cep)}.`,
+  });
+});
+
+// Consulta real ao SRO Intranet (funciona quando este servidor roda dentro da rede corporativa dos Correios)
+app.get('/api/sro/consulta/:codigo', async (req, res) => {
+  const codigo = normalizeTrackingCode(req.params.codigo);
+  if (!isValidTrackingCode(codigo)) {
+    return res.status(400).json({
+      ok: false,
+      errorCode: 'INVALID_CODE',
+      message: 'Código de rastreamento inválido (formato esperado: AA123456789BR).',
+    });
+  }
+
+  const targetUrl = `https://srointranet.correios.com.br/rastreamento?objeto=${encodeURIComponent(codigo)}`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+
+    const sroRes = await fetch(targetUrl, {
+      method: 'GET',
+      redirect: 'manual',
+      headers: {
+        Accept: 'text/html,application/json,text/plain,*/*',
+        'User-Agent': 'Correios-Controle-Recondicionados/1.0',
+      },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+
+    if (
+      sroRes.status === 401 ||
+      sroRes.status === 403 ||
+      (sroRes.status >= 300 && sroRes.status < 400)
+    ) {
+      return res.status(401).json({
+        ok: false,
+        errorCode: 'AUTH_REQUIRED',
+        message: 'O SRO Intranet exigiu autenticação corporativa nesta estação.',
+        technicalDetail:
+          'Sem credenciais armazenadas no servidor: acesse o SRO Intranet com sua sessão autenticada no navegador e cole os dados do objeto na tela de cadastro.',
+      });
+    }
+
+    if (!sroRes.ok) {
+      return res.status(502).json({
+        ok: false,
+        errorCode: 'INTRANET_UNREACHABLE',
+        message: `O SRO Intranet respondeu com HTTP ${sroRes.status}.`,
+      });
+    }
+
+    const bodyText = await sroRes.text();
+    const parsed = parseSroContent(bodyText, codigo);
+    if (!parsed.ok) {
+      return res.status(parsed.errorCode === 'AUTH_REQUIRED' ? 401 : 404).json(parsed);
+    }
+
+    return res.json(parsed);
+  } catch (err: any) {
+    const detail = err?.cause?.code || err?.message || 'Host inacessível';
+    return res.status(503).json({
+      ok: false,
+      errorCode: 'INTRANET_UNREACHABLE',
+      message: 'SRO Intranet inacessível a partir deste servidor.',
+      technicalDetail: `Este servidor não tem acesso direto à rede interna dos Correios (${detail}). Utilize a aba autenticada do SRO no navegador da unidade.`,
+    });
+  }
+});
+
+// Parser para conteúdo real copiado/enviado da aba autenticada do SRO Intranet
+app.post('/api/sro/parse', (req, res) => {
+  const { codigo, conteudo } = req.body || {};
+  const result = parseSroContent(conteudo, codigo);
+  if (!result.ok) {
+    return res.status(422).json(result);
+  }
+  return res.json(result);
 });
 
 // ==========================================
