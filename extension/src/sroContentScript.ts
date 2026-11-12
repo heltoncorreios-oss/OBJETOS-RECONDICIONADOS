@@ -4,6 +4,8 @@
  *
  * Princípios:
  * - Lê apenas o DOM efetivamente renderizado após carregamento da consulta.
+ * - Suporta telas SSR, SPAs (com input ou textarea), preenchimento automático da pesquisa
+ *   e detecção de tela de login ou objeto não encontrado.
  * - Não lê document.cookie, não armazena credenciais e não captura senhas.
  */
 
@@ -23,6 +25,8 @@ interface ExtractDomResponse {
   notFound?: boolean;
   hasTrackingMatch?: boolean;
   hasPostagemHint?: boolean;
+  inputFound?: boolean;
+  searchTriggered?: boolean;
   text: string;
   html: string;
   url: string;
@@ -39,7 +43,7 @@ function isLoginOrAuthScreen(text: string): boolean {
 }
 
 function isObjectNotFoundText(text: string): boolean {
-  return /(?:objeto\s+n[ãa]o\s+encontrado|nenhum\s+objeto\s+encontrado|dados\s+n[ãa]o\s+encontrados\s+para\s+o\s+objeto|c[óo]digo\s+n[ãa]o\s+encontrado)/i.test(
+  return /(?:objeto\s+n[ãa]o\s+encontrado|nenhum\s+objeto\s+encontrado|dados\s+n[ãa]o\s+encontrados\s+para\s+o\s+objeto|c[óo]digo\s+n[ãa]o\s+encontrado|n[ãa]o\s+possui\s+dados)/i.test(
     text
   );
 }
@@ -54,81 +58,163 @@ function normalizeCodeUpper(code: string): string {
   return (code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function findTrackingInput(): HTMLInputElement | null {
+type TrackingInputElement = HTMLInputElement | HTMLTextAreaElement;
+
+function findTrackingInput(): TrackingInputElement | null {
   const selectors = [
     'input[name*="objeto" i]',
     'input[id*="objeto" i]',
+    'textarea[name*="objeto" i]',
+    'textarea[id*="objeto" i]',
     'input[name*="rastre" i]',
     'input[id*="rastre" i]',
+    'textarea[name*="rastre" i]',
+    'textarea[id*="rastre" i]',
+    'input[placeholder*="SS123" i]',
+    'textarea[placeholder*="SS123" i]',
     'input[placeholder*="objeto" i]',
+    'textarea[placeholder*="objeto" i]',
     'input[placeholder*="rastre" i]',
+    'textarea[placeholder*="rastre" i]',
     'input[placeholder*="código" i]',
     'input[placeholder*="codigo" i]',
+    'textarea',
     'form input[type="text"]',
     'input[type="search"]',
+    'input[type="text"]',
   ];
 
   for (const selector of selectors) {
     const el = document.querySelector(selector);
-    if (el instanceof HTMLInputElement && !el.disabled && !el.readOnly) {
+    if (
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+      !el.disabled &&
+      !el.readOnly &&
+      el.type !== 'password' &&
+      el.type !== 'hidden'
+    ) {
       return el;
     }
   }
   return null;
 }
 
-function findSearchButton(input: HTMLInputElement | null): HTMLElement | null {
+function findSearchButton(input: TrackingInputElement | null): HTMLElement | null {
   const form = input?.closest('form');
   const scope: ParentNode = form || document;
 
   const submitBtn = scope.querySelector(
-    'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i]'
+    'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i], input[type="button"][value*="pesq" i], input[type="button"][value*="busc" i], input[type="button"][value*="cons" i]'
   );
   if (submitBtn instanceof HTMLElement) {
     return submitBtn;
   }
 
-  const buttons = Array.from(scope.querySelectorAll('button'));
-  for (const btn of buttons) {
-    const label = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-    if (/pesquisar|consultar|buscar|rastrear|enviar/.test(label)) {
-      return btn;
+  const candidates = Array.from(
+    scope.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
+  );
+  for (const el of candidates) {
+    if (!(el instanceof HTMLElement)) continue;
+    const rawText = [
+      el.innerText,
+      el.textContent,
+      el.getAttribute('title'),
+      el.getAttribute('aria-label'),
+      el instanceof HTMLInputElement ? el.value : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .toLowerCase();
+
+    if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar)/.test(rawText)) {
+      return el;
     }
   }
 
   return null;
 }
 
-function triggerInputAndSearch(trackingCode: string): boolean {
+function triggerInputAndSearch(trackingCode: string): {
+  inputFound: boolean;
+  searchTriggered: boolean;
+} {
   const input = findTrackingInput();
-  if (!input) return false;
+  if (!input) {
+    return { inputFound: false, searchTriggered: false };
+  }
 
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype,
-    'value'
-  )?.set;
+  const proto =
+    input instanceof HTMLTextAreaElement
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   if (nativeSetter) {
     nativeSetter.call(input, trackingCode);
   } else {
     input.value = trackingCode;
   }
 
+  input.focus();
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 
   const button = findSearchButton(input);
   if (button) {
     button.click();
-    return true;
+    return { inputFound: true, searchTriggered: true };
   }
 
   const form = input.closest('form');
   if (form) {
     form.requestSubmit ? form.requestSubmit() : form.submit();
-    return true;
+    return { inputFound: true, searchTriggered: true };
   }
 
-  return false;
+  // Fallback com Enter caso o SPA ouça keydown/keyup sem tag <form>
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+  );
+  input.dispatchEvent(
+    new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+  );
+  return { inputFound: true, searchTriggered: true };
+}
+
+function waitForInitialMount(trackingCode: string, timeoutMs: number): Promise<void> {
+  const cleanCode = normalizeCodeUpper(trackingCode);
+  const readyNow = () => {
+    const text = document.body?.innerText || '';
+    if (isLoginOrAuthScreen(text) || isObjectNotFoundText(text)) return true;
+    if (text.toUpperCase().includes(cleanCode) && hasPostagemHint(text)) return true;
+    if (findTrackingInput() !== null) return true;
+    return false;
+  };
+
+  if (readyNow()) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let done = false;
+    let observer: MutationObserver | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      observer?.disconnect();
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+
+    observer = new MutationObserver(() => {
+      if (readyNow()) finish();
+    });
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+    timer = setTimeout(finish, timeoutMs);
+  });
 }
 
 function waitForRenderedSroDom(
@@ -144,12 +230,13 @@ function waitForRenderedSroDom(
     if (isObjectNotFoundText(text)) return true;
 
     const upperText = text.toUpperCase();
-    if (upperText.includes(cleanCode)) {
-      // Aguarda um evento visível ou indicador de carregamento concluir
-      const loadingBusy = Boolean(
-        document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
-      );
-      if (!loadingBusy) return true;
+    const loadingBusy = Boolean(
+      document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
+    );
+    if (loadingBusy) return false;
+
+    if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text))) {
+      return true;
     }
     return false;
   };
@@ -173,8 +260,7 @@ function waitForRenderedSroDom(
 
     observer = new MutationObserver(() => {
       if (isDomReady()) {
-        // Pequeno respiro para garantir finalização da renderização do frame atual
-        setTimeout(() => finish(true), 150);
+        setTimeout(() => finish(true), 200);
       }
     });
 
@@ -204,6 +290,10 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
   }
 
   const cleanCode = normalizeCodeUpper(msg.trackingCode);
+
+  // Aguarda hidratação inicial caso a página seja SPA
+  await waitForInitialMount(cleanCode, 3000);
+
   let text = document.body?.innerText || '';
 
   if (isLoginOrAuthScreen(text)) {
@@ -218,10 +308,17 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
     };
   }
 
-  // Se o código ainda não apareceu renderizado na página, tenta submeter o campo de consulta do SPA/formulário
+  let inputFound = false;
+  let searchTriggered = false;
   const upperInitial = text.toUpperCase();
-  if (!upperInitial.includes(cleanCode) && !isObjectNotFoundText(text)) {
-    triggerInputAndSearch(cleanCode);
+  const alreadyHasResults =
+    upperInitial.includes(cleanCode) &&
+    (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text));
+
+  if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+    const triggerRes = triggerInputAndSearch(cleanCode);
+    inputFound = triggerRes.inputFound;
+    searchTriggered = triggerRes.searchTriggered;
   }
 
   await waitForRenderedSroDom(cleanCode, 7500);
@@ -240,6 +337,8 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
     notFound,
     hasTrackingMatch,
     hasPostagemHint: hasPostagemHint(text),
+    inputFound,
+    searchTriggered,
     text,
     html,
     url: window.location.href,

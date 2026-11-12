@@ -160,6 +160,9 @@ export function htmlToReadableText(raw: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ');
 
+  // Remover atributos placeholder para que exemplos de tela (ex: SS123456789BR) não sejam confundidos com códigos reais
+  text = text.replace(/\splaceholder=["'][^"']*["']/gi, ' ');
+
   // Preservar valores de inputs caso a tela tenha campos read-only
   text = text.replace(/<input[^>]*value=["']([^"']*)["'][^>]*>/gi, ' $1 ');
 
@@ -351,9 +354,17 @@ export function parseSroContent(
   }
 
   // Verificar se há outro código explícito na resposta diferente do esperado
+  // Ignorar códigos fictícios usados pelos Correios como exemplo/placeholder nas telas do SRO
   if (expectedClean) {
-    const foundCodes = readable.toUpperCase().match(/\b[A-Z]{2}\d{9}[A-Z]{2}\b/g);
-    if (foundCodes && foundCodes.length > 0 && !foundCodes.includes(expectedClean)) {
+    const IGNORED_PLACEHOLDER_CODES = new Set([
+      'SS123456789BR',
+      'AA123456789BR',
+      'BR123456789BR',
+      'XX123456789BR',
+    ]);
+    const rawFoundCodes = readable.toUpperCase().match(/\b[A-Z]{2}\d{9}[A-Z]{2}\b/g) || [];
+    const foundCodes = rawFoundCodes.filter((c) => !IGNORED_PLACEHOLDER_CODES.has(c));
+    if (foundCodes.length > 0 && !foundCodes.includes(expectedClean)) {
       return {
         ok: false,
         errorCode: 'OBJECT_NOT_FOUND',

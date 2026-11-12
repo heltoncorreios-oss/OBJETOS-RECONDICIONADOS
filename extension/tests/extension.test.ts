@@ -99,6 +99,30 @@ function testParserRules() {
   const notFound = parseSroContent('Objeto não encontrado na base de dados.', 'AE047884658BR');
   assert.equal(notFound.ok, false);
   assert.equal(notFound.errorCode, 'OBJECT_NOT_FOUND');
+
+  // Regressão: placeholder ou exemplo SS123456789BR na tela não pode ser confundido com objeto divergente
+  const htmlWithPlaceholder = `
+    <textarea placeholder="SS123456789BR"></textarea>
+    <div>Exemplo: SS123456789BR</div>
+    <div>Objeto: AE139312695BR</div>
+    <table>
+      <tr><th colspan="2">Postagem (PO)</th></tr>
+      <tr><th>Peso</th><td>1,400 kg</td></tr>
+      <tr><th>VD</th><td>N</td></tr>
+      <tr><th>Unidade</th><td>AC SAO MANUEL</td></tr>
+      <tr><th>Remetente</th><td>LOJA MODELO</td></tr>
+      <tr><th>CEP Remetente</th><td>04041-000</td></tr>
+      <tr><th>Número Logradouro</th><td>100</td></tr>
+      <tr><th>Destinatário</th><td>CLIENTE FINAL</td></tr>
+      <tr><th>CEP Destinatário</th><td>18650-065</td></tr>
+      <tr><th>Número Logradouro</th><td>250</td></tr>
+    </table>
+  `;
+  const parsedPlaceholder = parseSroContent(htmlWithPlaceholder, 'AE139312695BR');
+  assert.equal(parsedPlaceholder.ok, true);
+  assert.equal(parsedPlaceholder.data?.codigoRastreamento, 'AE139312695BR');
+  assert.equal(parsedPlaceholder.data?.pesoGramas, 1400);
+  assert.equal(parsedPlaceholder.data?.valorDeclarado, 'NÃO');
 }
 
 function testExtensionCommunicationValidation() {
@@ -184,6 +208,26 @@ async function testBackgroundOriginAndSingleTabReuse() {
     status: 'complete',
   };
 
+  let mockDomRes: any = {
+    ok: true,
+    authRequired: false,
+    hasTrackingMatch: true,
+    notFound: false,
+    text: `
+      Objeto: AE047884658BR
+      Postagem (PO)
+      Peso: 1,250 kg
+      VD: S
+      Unidade: AGF TESTE
+      Remetente: REM A
+      CEP Remetente: 04041-000
+      Número Logradouro: 10
+      Destinatário: DEST B
+      CEP Destinatário: 18650-065
+      Número Logradouro: 20
+    `,
+  };
+
   (globalThis as any).chrome = {
     runtime: {
       onMessage: {
@@ -203,23 +247,7 @@ async function testBackgroundOriginAndSingleTabReuse() {
         createdTabs.push(props);
         return { id: 99, ...props };
       },
-      sendMessage: async () => ({
-        ok: true,
-        authRequired: false,
-        text: `
-          Objeto: AE047884658BR
-          Postagem (PO)
-          Peso: 1,250 kg
-          VD: S
-          Unidade: AGF TESTE
-          Remetente: REM A
-          CEP Remetente: 04041-000
-          Número Logradouro: 10
-          Destinatário: DEST B
-          CEP Destinatário: 18650-065
-          Número Logradouro: 20
-        `,
-      }),
+      sendMessage: async () => mockDomRes,
     },
     storage: {
       local: { get: async () => ({}), set: async () => {} },
@@ -262,6 +290,29 @@ async function testBackgroundOriginAndSingleTabReuse() {
   assert.equal(updatedTabs.length, 1);
   assert.equal(updatedTabs[0].id, 42);
   assert.equal(createdTabs.length, 0, 'Deve reutilizar a aba existente do SRO sem criar nova aba');
+
+  // Tela inicial do SRO ainda sem resultado para o objeto consultado não deve acusar OBJECT_NOT_FOUND de placeholder
+  mockDomRes = {
+    ok: true,
+    authRequired: false,
+    hasTrackingMatch: false,
+    notFound: false,
+    html: '<textarea placeholder="SS123456789BR"></textarea><div>Informe o código do objeto</div>',
+    text: 'Informe o código do objeto SS123456789BR',
+  };
+  const unloadedScreenResponse: any = await new Promise((resolve) => {
+    handler(
+      { type: 'SRO_QUERY_REQUEST', requestId: 'req_99999999', trackingCode: 'AE139312695BR' },
+      {
+        origin: 'https://recondicionamentodeobjetos.vercel.app',
+        frameId: 0,
+        tab: { url: 'https://recondicionamentodeobjetos.vercel.app/' },
+      },
+      resolve
+    );
+  });
+  assert.equal(unloadedScreenResponse.ok, false);
+  assert.equal(unloadedScreenResponse.errorCode, 'INTRANET_UNREACHABLE');
 
   delete (globalThis as any).chrome;
 }

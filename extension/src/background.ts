@@ -343,6 +343,18 @@ async function executeSroQuery(
       };
     }
 
+    if (!domRes.notFound && !domRes.hasTrackingMatch) {
+      return {
+        ok: false,
+        requestId,
+        trackingCode: cleanCode,
+        extensionVersion: EXTENSION_VERSION,
+        errorCode: 'INTRANET_UNREACHABLE',
+        message:
+          'A aba do SRO Intranet abriu, mas o resultado do objeto não carregou automaticamente na tela. Confira a aba do SRO ou cole os dados abaixo.',
+      };
+    }
+
     const rawContent = domRes.html || domRes.text || '';
     const parsed = parseSroContent(rawContent, cleanCode);
 

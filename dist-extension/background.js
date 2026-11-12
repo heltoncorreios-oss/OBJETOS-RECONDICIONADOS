@@ -100,6 +100,7 @@ function decodeHtmlEntities(text) {
 function htmlToReadableText(raw) {
   if (!raw) return "";
   let text = raw.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
+  text = text.replace(/\splaceholder=["'][^"']*["']/gi, " ");
   text = text.replace(/<input[^>]*value=["']([^"']*)["'][^>]*>/gi, " $1 ");
   text = text.replace(/<(br|\/tr|\/div|\/p|\/li|\/h[1-6]|\/section)\b[^>]*>/gi, "\n").replace(/<(td|th)\b[^>]*>/gi, " ").replace(/<\/th>/gi, ": ").replace(/<\/td>/gi, " | ").replace(/<[^>]+>/g, " ");
   text = decodeHtmlEntities(text);
@@ -227,8 +228,15 @@ function parseSroContent(rawInput, expectedTrackingCode) {
     };
   }
   if (expectedClean) {
-    const foundCodes = readable.toUpperCase().match(/\b[A-Z]{2}\d{9}[A-Z]{2}\b/g);
-    if (foundCodes && foundCodes.length > 0 && !foundCodes.includes(expectedClean)) {
+    const IGNORED_PLACEHOLDER_CODES = /* @__PURE__ */ new Set([
+      "SS123456789BR",
+      "AA123456789BR",
+      "BR123456789BR",
+      "XX123456789BR"
+    ]);
+    const rawFoundCodes = readable.toUpperCase().match(/\b[A-Z]{2}\d{9}[A-Z]{2}\b/g) || [];
+    const foundCodes = rawFoundCodes.filter((c) => !IGNORED_PLACEHOLDER_CODES.has(c));
+    if (foundCodes.length > 0 && !foundCodes.includes(expectedClean)) {
       return {
         ok: false,
         errorCode: "OBJECT_NOT_FOUND",
@@ -565,6 +573,16 @@ async function executeSroQuery(rawCode, requestId) {
         extensionVersion: EXTENSION_VERSION,
         errorCode: "AUTH_REQUIRED",
         message: "Sess\xE3o do SRO Intranet expirada. Autentique-se na aba do SRO e consulte novamente."
+      };
+    }
+    if (!domRes.notFound && !domRes.hasTrackingMatch) {
+      return {
+        ok: false,
+        requestId,
+        trackingCode: cleanCode,
+        extensionVersion: EXTENSION_VERSION,
+        errorCode: "INTRANET_UNREACHABLE",
+        message: "A aba do SRO Intranet abriu, mas o resultado do objeto n\xE3o carregou automaticamente na tela. Confira a aba do SRO ou cole os dados abaixo."
       };
     }
     const rawContent = domRes.html || domRes.text || "";

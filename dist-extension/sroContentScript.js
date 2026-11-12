@@ -14,7 +14,7 @@
     );
   }
   function isObjectNotFoundText(text) {
-    return /(?:objeto\s+n[ãa]o\s+encontrado|nenhum\s+objeto\s+encontrado|dados\s+n[ãa]o\s+encontrados\s+para\s+o\s+objeto|c[óo]digo\s+n[ãa]o\s+encontrado)/i.test(
+    return /(?:objeto\s+n[ãa]o\s+encontrado|nenhum\s+objeto\s+encontrado|dados\s+n[ãa]o\s+encontrados\s+para\s+o\s+objeto|c[óo]digo\s+n[ãa]o\s+encontrado|n[ãa]o\s+possui\s+dados)/i.test(
       text
     );
   }
@@ -30,18 +30,28 @@
     const selectors = [
       'input[name*="objeto" i]',
       'input[id*="objeto" i]',
+      'textarea[name*="objeto" i]',
+      'textarea[id*="objeto" i]',
       'input[name*="rastre" i]',
       'input[id*="rastre" i]',
+      'textarea[name*="rastre" i]',
+      'textarea[id*="rastre" i]',
+      'input[placeholder*="SS123" i]',
+      'textarea[placeholder*="SS123" i]',
       'input[placeholder*="objeto" i]',
+      'textarea[placeholder*="objeto" i]',
       'input[placeholder*="rastre" i]',
+      'textarea[placeholder*="rastre" i]',
       'input[placeholder*="c\xF3digo" i]',
       'input[placeholder*="codigo" i]',
+      "textarea",
       'form input[type="text"]',
-      'input[type="search"]'
+      'input[type="search"]',
+      'input[type="text"]'
     ];
     for (const selector of selectors) {
       const el = document.querySelector(selector);
-      if (el instanceof HTMLInputElement && !el.disabled && !el.readOnly) {
+      if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.disabled && !el.readOnly && el.type !== "password" && el.type !== "hidden") {
         return el;
       }
     }
@@ -51,45 +61,91 @@
     const form = input?.closest("form");
     const scope = form || document;
     const submitBtn = scope.querySelector(
-      'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i]'
+      'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i], input[type="button"][value*="pesq" i], input[type="button"][value*="busc" i], input[type="button"][value*="cons" i]'
     );
     if (submitBtn instanceof HTMLElement) {
       return submitBtn;
     }
-    const buttons = Array.from(scope.querySelectorAll("button"));
-    for (const btn of buttons) {
-      const label = (btn.innerText || btn.textContent || "").trim().toLowerCase();
-      if (/pesquisar|consultar|buscar|rastrear|enviar/.test(label)) {
-        return btn;
+    const candidates = Array.from(
+      scope.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
+    );
+    for (const el of candidates) {
+      if (!(el instanceof HTMLElement)) continue;
+      const rawText = [
+        el.innerText,
+        el.textContent,
+        el.getAttribute("title"),
+        el.getAttribute("aria-label"),
+        el instanceof HTMLInputElement ? el.value : ""
+      ].filter(Boolean).join(" ").trim().toLowerCase();
+      if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar)/.test(rawText)) {
+        return el;
       }
     }
     return null;
   }
   function triggerInputAndSearch(trackingCode) {
     const input = findTrackingInput();
-    if (!input) return false;
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value"
-    )?.set;
+    if (!input) {
+      return { inputFound: false, searchTriggered: false };
+    }
+    const proto = input instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (nativeSetter) {
       nativeSetter.call(input, trackingCode);
     } else {
       input.value = trackingCode;
     }
+    input.focus();
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     const button = findSearchButton(input);
     if (button) {
       button.click();
-      return true;
+      return { inputFound: true, searchTriggered: true };
     }
     const form = input.closest("form");
     if (form) {
       form.requestSubmit ? form.requestSubmit() : form.submit();
-      return true;
+      return { inputFound: true, searchTriggered: true };
     }
-    return false;
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
+    );
+    return { inputFound: true, searchTriggered: true };
+  }
+  function waitForInitialMount(trackingCode, timeoutMs) {
+    const cleanCode = normalizeCodeUpper(trackingCode);
+    const readyNow = () => {
+      const text = document.body?.innerText || "";
+      if (isLoginOrAuthScreen(text) || isObjectNotFoundText(text)) return true;
+      if (text.toUpperCase().includes(cleanCode) && hasPostagemHint(text)) return true;
+      if (findTrackingInput() !== null) return true;
+      return false;
+    };
+    if (readyNow()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      let observer = null;
+      let timer = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        observer?.disconnect();
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      observer = new MutationObserver(() => {
+        if (readyNow()) finish();
+      });
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+      timer = setTimeout(finish, timeoutMs);
+    });
   }
   function waitForRenderedSroDom(trackingCode, timeoutMs) {
     const cleanCode = normalizeCodeUpper(trackingCode);
@@ -99,11 +155,12 @@
       if (isLoginOrAuthScreen(text)) return true;
       if (isObjectNotFoundText(text)) return true;
       const upperText = text.toUpperCase();
-      if (upperText.includes(cleanCode)) {
-        const loadingBusy = Boolean(
-          document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
-        );
-        if (!loadingBusy) return true;
+      const loadingBusy = Boolean(
+        document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
+      );
+      if (loadingBusy) return false;
+      if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text))) {
+        return true;
       }
       return false;
     };
@@ -123,7 +180,7 @@
       };
       observer = new MutationObserver(() => {
         if (isDomReady()) {
-          setTimeout(() => finish(true), 150);
+          setTimeout(() => finish(true), 200);
         }
       });
       if (document.body) {
@@ -149,6 +206,7 @@
       };
     }
     const cleanCode = normalizeCodeUpper(msg.trackingCode);
+    await waitForInitialMount(cleanCode, 3e3);
     let text = document.body?.innerText || "";
     if (isLoginOrAuthScreen(text)) {
       return {
@@ -161,9 +219,14 @@
         url: window.location.href
       };
     }
+    let inputFound = false;
+    let searchTriggered = false;
     const upperInitial = text.toUpperCase();
-    if (!upperInitial.includes(cleanCode) && !isObjectNotFoundText(text)) {
-      triggerInputAndSearch(cleanCode);
+    const alreadyHasResults = upperInitial.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text));
+    if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+      const triggerRes = triggerInputAndSearch(cleanCode);
+      inputFound = triggerRes.inputFound;
+      searchTriggered = triggerRes.searchTriggered;
     }
     await waitForRenderedSroDom(cleanCode, 7500);
     text = document.body?.innerText || "";
@@ -179,6 +242,8 @@
       notFound,
       hasTrackingMatch,
       hasPostagemHint: hasPostagemHint(text),
+      inputFound,
+      searchTriggered,
       text,
       html,
       url: window.location.href
