@@ -335,8 +335,8 @@ var OFFICIAL_APP_URL_PREFIX = `${OFFICIAL_APP_ORIGIN}/`;
 var SRO_INTRANET_ORIGIN = "https://srointranet.correios.com.br";
 var SRO_INTRANET_BASE_URL = `${SRO_INTRANET_ORIGIN}/rastreamento`;
 var EXTENSION_VERSION = "1.0.0";
-var EXTENSION_QUERY_TIMEOUT_MS = 14e3;
-var EXTENSION_TAB_LOAD_TIMEOUT_MS = 1e4;
+var EXTENSION_QUERY_TIMEOUT_MS = 2e4;
+var EXTENSION_TAB_LOAD_TIMEOUT_MS = 12e3;
 
 // extension/src/background.ts
 var MANAGED_TAB_STORAGE_KEY = "sroManagedTabId";
@@ -407,13 +407,13 @@ function isLikelyExternalSsoRedirect(url) {
   }
   return url.startsWith("https://") && /(?:idcorreios|cas|sso|login|auth|adfs|acesso\.correios)/i.test(url);
 }
-async function waitForTabReady(tabId, queryState, timeoutMs) {
+async function waitForTabReady(tabId, queryState, timeoutMs, waitForFreshComplete = false) {
   try {
     const currentTab = await chrome.tabs.get(tabId);
     if (isLikelyExternalSsoRedirect(currentTab.url)) {
       return { ready: false, redirectedToAuth: true, finalUrl: currentTab.url };
     }
-    if (currentTab.status === "complete" && currentTab.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+    if (!waitForFreshComplete && currentTab.status === "complete" && currentTab.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
       return { ready: true, redirectedToAuth: false, finalUrl: currentTab.url };
     }
   } catch {
@@ -421,9 +421,11 @@ async function waitForTabReady(tabId, queryState, timeoutMs) {
   }
   return new Promise((resolve) => {
     let settled = false;
+    let sawLoading = false;
     const cleanup = () => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       clearTimeout(timer);
+      clearTimeout(quickFallback);
       clearInterval(cancelCheck);
     };
     const finish = (res) => {
@@ -438,6 +440,9 @@ async function waitForTabReady(tabId, queryState, timeoutMs) {
         finish({ ready: false, redirectedToAuth: false });
         return;
       }
+      if (changeInfo.status === "loading") {
+        sawLoading = true;
+      }
       const currentUrl = changeInfo.url || tab.url;
       if (isLikelyExternalSsoRedirect(currentUrl)) {
         finish({ ready: false, redirectedToAuth: true, finalUrl: currentUrl });
@@ -448,6 +453,16 @@ async function waitForTabReady(tabId, queryState, timeoutMs) {
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
+    const quickFallback = setTimeout(async () => {
+      if (settled || !waitForFreshComplete || sawLoading) return;
+      try {
+        const tabNow = await chrome.tabs.get(tabId);
+        if (tabNow.status === "complete" && tabNow.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)) {
+          finish({ ready: true, redirectedToAuth: false, finalUrl: tabNow.url });
+        }
+      } catch {
+      }
+    }, 600);
     const cancelCheck = setInterval(() => {
       if (queryState.cancelled) {
         finish({ ready: false, redirectedToAuth: false });
@@ -458,30 +473,38 @@ async function waitForTabReady(tabId, queryState, timeoutMs) {
     }, timeoutMs);
   });
 }
-async function executeSroQuery(rawCode, requestId) {
-  const cleanCode = normalizeTrackingCode(rawCode);
-  if (!isValidTrackingCode(cleanCode)) {
-    return {
-      ok: false,
-      requestId,
-      trackingCode: cleanCode,
-      extensionVersion: EXTENSION_VERSION,
-      errorCode: "INVALID_CODE",
-      message: "C\xF3digo de rastreamento inv\xE1lido para consulta no SRO."
-    };
+async function sendExtractDomWithRetry(tabId, cleanCode, requestId, queryState) {
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (queryState.cancelled) return null;
+    try {
+      return await chrome.tabs.sendMessage(tabId, {
+        type: "SRO_EXTRACT_DOM",
+        trackingCode: cleanCode,
+        requestId
+      });
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (/message channel closed|back\/forward cache/i.test(msg)) {
+        const reloadState = await waitForTabReady(tabId, queryState, 8e3, true);
+        if (!reloadState.ready) {
+          if (reloadState.redirectedToAuth) {
+            return { ok: false, authRequired: true };
+          }
+          throw err;
+        }
+        continue;
+      }
+      if (/Receiving end does not exist/i.test(msg) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      throw err;
+    }
   }
-  if (activeQuery) {
-    activeQuery.cancelled = true;
-  }
-  const queryState = {
-    requestId,
-    trackingCode: cleanCode,
-    cancelled: false
-  };
-  activeQuery = queryState;
-  const deadlineTimer = setTimeout(() => {
-    queryState.cancelled = true;
-  }, EXTENSION_QUERY_TIMEOUT_MS);
+  return null;
+}
+async function executeSroQueryInner(cleanCode, requestId, queryState) {
   try {
     const targetUrl = `${SRO_INTRANET_BASE_URL}?objeto=${encodeURIComponent(cleanCode)}`;
     const tab = await acquireSingleSroTab(targetUrl);
@@ -508,7 +531,8 @@ async function executeSroQuery(rawCode, requestId) {
     const loadState = await waitForTabReady(
       tab.id,
       queryState,
-      EXTENSION_TAB_LOAD_TIMEOUT_MS
+      EXTENSION_TAB_LOAD_TIMEOUT_MS,
+      true
     );
     if (queryState.cancelled) {
       return {
@@ -540,11 +564,7 @@ async function executeSroQuery(rawCode, requestId) {
         message: "Tempo esgotado ao carregar o SRO Intranet. Verifique a conex\xE3o na rede corporativa."
       };
     }
-    const domRes = await chrome.tabs.sendMessage(tab.id, {
-      type: "SRO_EXTRACT_DOM",
-      trackingCode: cleanCode,
-      requestId
-    });
+    const domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
     if (queryState.cancelled) {
       return {
         ok: false,
@@ -576,13 +596,19 @@ async function executeSroQuery(rawCode, requestId) {
       };
     }
     if (!domRes.notFound && !domRes.hasTrackingMatch) {
+      let diagnostic = "A aba do SRO Intranet abriu, mas o resultado do objeto n\xE3o carregou automaticamente na tela.";
+      if (domRes.inputFound === false) {
+        diagnostic = "A aba do SRO Intranet abriu, mas o campo de pesquisa n\xE3o foi localizado automaticamente na tela.";
+      } else if (domRes.searchTriggered === false) {
+        diagnostic = "A aba do SRO Intranet abriu, mas n\xE3o foi poss\xEDvel acionar o bot\xE3o de pesquisa automaticamente.";
+      }
       return {
         ok: false,
         requestId,
         trackingCode: cleanCode,
         extensionVersion: EXTENSION_VERSION,
         errorCode: "INTRANET_UNREACHABLE",
-        message: "A aba do SRO Intranet abriu, mas o resultado do objeto n\xE3o carregou automaticamente na tela. Confira a aba do SRO ou cole os dados abaixo."
+        message: `${diagnostic} Confira a aba do SRO ou cole os dados abaixo.`
       };
     }
     const rawContent = domRes.html || domRes.text || "";
@@ -623,8 +649,50 @@ async function executeSroQuery(rawCode, requestId) {
       errorCode: "INTRANET_UNREACHABLE",
       message: err?.message || "N\xE3o foi poss\xEDvel comunicar com a aba do SRO Intranet nesta esta\xE7\xE3o."
     };
+  }
+}
+async function executeSroQuery(rawCode, requestId) {
+  const cleanCode = normalizeTrackingCode(rawCode);
+  if (!isValidTrackingCode(cleanCode)) {
+    return {
+      ok: false,
+      requestId,
+      trackingCode: cleanCode,
+      extensionVersion: EXTENSION_VERSION,
+      errorCode: "INVALID_CODE",
+      message: "C\xF3digo de rastreamento inv\xE1lido para consulta no SRO."
+    };
+  }
+  if (activeQuery) {
+    activeQuery.cancelled = true;
+  }
+  const queryState = {
+    requestId,
+    trackingCode: cleanCode,
+    cancelled: false
+  };
+  activeQuery = queryState;
+  let deadlineTimer = null;
+  const deadlinePromise = new Promise((resolve) => {
+    deadlineTimer = setTimeout(() => {
+      queryState.cancelled = true;
+      resolve({
+        ok: false,
+        requestId,
+        trackingCode: cleanCode,
+        extensionVersion: EXTENSION_VERSION,
+        errorCode: "EXTENSION_TIMEOUT",
+        message: "O SRO Intranet demorou para responder. Verifique se a sess\xE3o est\xE1 logada na aba do SRO ou cole os dados abaixo."
+      });
+    }, EXTENSION_QUERY_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([
+      executeSroQueryInner(cleanCode, requestId, queryState),
+      deadlinePromise
+    ]);
   } finally {
-    clearTimeout(deadlineTimer);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
     if (activeQuery === queryState) {
       activeQuery = null;
     }

@@ -135,7 +135,8 @@ function isLikelyExternalSsoRedirect(url: string | undefined): boolean {
 async function waitForTabReady(
   tabId: number,
   queryState: ActiveQueryState,
-  timeoutMs: number
+  timeoutMs: number,
+  waitForFreshComplete = false
 ): Promise<{ ready: boolean; redirectedToAuth: boolean; finalUrl?: string }> {
   try {
     const currentTab = await chrome.tabs.get(tabId);
@@ -143,6 +144,7 @@ async function waitForTabReady(
       return { ready: false, redirectedToAuth: true, finalUrl: currentTab.url };
     }
     if (
+      !waitForFreshComplete &&
       currentTab.status === 'complete' &&
       currentTab.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
     ) {
@@ -154,10 +156,12 @@ async function waitForTabReady(
 
   return new Promise((resolve) => {
     let settled = false;
+    let sawLoading = false;
 
     const cleanup = () => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       clearTimeout(timer);
+      clearTimeout(quickFallback);
       clearInterval(cancelCheck);
     };
 
@@ -179,6 +183,10 @@ async function waitForTabReady(
         return;
       }
 
+      if (changeInfo.status === 'loading') {
+        sawLoading = true;
+      }
+
       const currentUrl = changeInfo.url || tab.url;
       if (isLikelyExternalSsoRedirect(currentUrl)) {
         finish({ ready: false, redirectedToAuth: true, finalUrl: currentUrl });
@@ -192,6 +200,22 @@ async function waitForTabReady(
 
     chrome.tabs.onUpdated.addListener(onUpdated);
 
+    // Se tabs.update não disparou mudança de URL (ex: mesma URL já carregada), não ficar preso
+    const quickFallback = setTimeout(async () => {
+      if (settled || !waitForFreshComplete || sawLoading) return;
+      try {
+        const tabNow = await chrome.tabs.get(tabId);
+        if (
+          tabNow.status === 'complete' &&
+          tabNow.url?.startsWith(`${SRO_INTRANET_ORIGIN}/`)
+        ) {
+          finish({ ready: true, redirectedToAuth: false, finalUrl: tabNow.url });
+        }
+      } catch {
+        // Ignorar
+      }
+    }, 600);
+
     const cancelCheck = setInterval(() => {
       if (queryState.cancelled) {
         finish({ ready: false, redirectedToAuth: false });
@@ -204,38 +228,50 @@ async function waitForTabReady(
   });
 }
 
-async function executeSroQuery(
-  rawCode: string,
-  requestId: string
+async function sendExtractDomWithRetry(
+  tabId: number,
+  cleanCode: string,
+  requestId: string,
+  queryState: ActiveQueryState
+): Promise<any> {
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (queryState.cancelled) return null;
+    try {
+      return await chrome.tabs.sendMessage(tabId, {
+        type: 'SRO_EXTRACT_DOM',
+        trackingCode: cleanCode,
+        requestId,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      // Caso o submit da pesquisa tenha provocado recarregamento da página do SRO, aguardar nova página e tentar mais uma vez
+      if (/message channel closed|back\/forward cache/i.test(msg)) {
+        const reloadState = await waitForTabReady(tabId, queryState, 8000, true);
+        if (!reloadState.ready) {
+          if (reloadState.redirectedToAuth) {
+            return { ok: false, authRequired: true };
+          }
+          throw err;
+        }
+        continue;
+      }
+
+      if (/Receiving end does not exist/i.test(msg) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+
+async function executeSroQueryInner(
+  cleanCode: string,
+  requestId: string,
+  queryState: ActiveQueryState
 ): Promise<ExtensionQueryResult> {
-  const cleanCode = normalizeTrackingCode(rawCode);
-  if (!isValidTrackingCode(cleanCode)) {
-    return {
-      ok: false,
-      requestId,
-      trackingCode: cleanCode,
-      extensionVersion: EXTENSION_VERSION,
-      errorCode: 'INVALID_CODE',
-      message: 'Código de rastreamento inválido para consulta no SRO.',
-    };
-  }
-
-  // Cancelar consulta anterior antes de iniciar a nova
-  if (activeQuery) {
-    activeQuery.cancelled = true;
-  }
-
-  const queryState: ActiveQueryState = {
-    requestId,
-    trackingCode: cleanCode,
-    cancelled: false,
-  };
-  activeQuery = queryState;
-
-  const deadlineTimer = setTimeout(() => {
-    queryState.cancelled = true;
-  }, EXTENSION_QUERY_TIMEOUT_MS);
-
   try {
     const targetUrl = `${SRO_INTRANET_BASE_URL}?objeto=${encodeURIComponent(cleanCode)}`;
     const tab = await acquireSingleSroTab(targetUrl);
@@ -265,7 +301,8 @@ async function executeSroQuery(
     const loadState = await waitForTabReady(
       tab.id,
       queryState,
-      EXTENSION_TAB_LOAD_TIMEOUT_MS
+      EXTENSION_TAB_LOAD_TIMEOUT_MS,
+      true
     );
 
     if (queryState.cancelled) {
@@ -303,11 +340,7 @@ async function executeSroQuery(
       };
     }
 
-    const domRes = await chrome.tabs.sendMessage(tab.id, {
-      type: 'SRO_EXTRACT_DOM',
-      trackingCode: cleanCode,
-      requestId,
-    });
+    const domRes = await sendExtractDomWithRetry(tab.id, cleanCode, requestId, queryState);
 
     if (queryState.cancelled) {
       return {
@@ -344,14 +377,23 @@ async function executeSroQuery(
     }
 
     if (!domRes.notFound && !domRes.hasTrackingMatch) {
+      let diagnostic =
+        'A aba do SRO Intranet abriu, mas o resultado do objeto não carregou automaticamente na tela.';
+      if (domRes.inputFound === false) {
+        diagnostic =
+          'A aba do SRO Intranet abriu, mas o campo de pesquisa não foi localizado automaticamente na tela.';
+      } else if (domRes.searchTriggered === false) {
+        diagnostic =
+          'A aba do SRO Intranet abriu, mas não foi possível acionar o botão de pesquisa automaticamente.';
+      }
+
       return {
         ok: false,
         requestId,
         trackingCode: cleanCode,
         extensionVersion: EXTENSION_VERSION,
         errorCode: 'INTRANET_UNREACHABLE',
-        message:
-          'A aba do SRO Intranet abriu, mas o resultado do objeto não carregou automaticamente na tela. Confira a aba do SRO ou cole os dados abaixo.',
+        message: `${diagnostic} Confira a aba do SRO ou cole os dados abaixo.`,
       };
     }
 
@@ -401,8 +443,60 @@ async function executeSroQuery(
         err?.message ||
         'Não foi possível comunicar com a aba do SRO Intranet nesta estação.',
     };
+  }
+}
+
+async function executeSroQuery(
+  rawCode: string,
+  requestId: string
+): Promise<ExtensionQueryResult> {
+  const cleanCode = normalizeTrackingCode(rawCode);
+  if (!isValidTrackingCode(cleanCode)) {
+    return {
+      ok: false,
+      requestId,
+      trackingCode: cleanCode,
+      extensionVersion: EXTENSION_VERSION,
+      errorCode: 'INVALID_CODE',
+      message: 'Código de rastreamento inválido para consulta no SRO.',
+    };
+  }
+
+  // Cancelar consulta anterior antes de iniciar a nova
+  if (activeQuery) {
+    activeQuery.cancelled = true;
+  }
+
+  const queryState: ActiveQueryState = {
+    requestId,
+    trackingCode: cleanCode,
+    cancelled: false,
+  };
+  activeQuery = queryState;
+
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  const deadlinePromise = new Promise<ExtensionQueryResult>((resolve) => {
+    deadlineTimer = setTimeout(() => {
+      queryState.cancelled = true;
+      resolve({
+        ok: false,
+        requestId,
+        trackingCode: cleanCode,
+        extensionVersion: EXTENSION_VERSION,
+        errorCode: 'EXTENSION_TIMEOUT',
+        message:
+          'O SRO Intranet demorou para responder. Verifique se a sessão está logada na aba do SRO ou cole os dados abaixo.',
+      });
+    }, EXTENSION_QUERY_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      executeSroQueryInner(cleanCode, requestId, queryState),
+      deadlinePromise,
+    ]);
   } finally {
-    clearTimeout(deadlineTimer);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
     if (activeQuery === queryState) {
       activeQuery = null;
     }

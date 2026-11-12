@@ -374,6 +374,8 @@ async function querySroViaExtension(
     };
   }
 
+  callbacks.onStatusChange?.('Consultando SRO Intranet pela extensão do navegador...');
+
   const requestId = createRequestNonce();
 
   const rawExtResponse: any = await new Promise((resolve, reject) => {
@@ -445,9 +447,10 @@ async function querySroViaExtension(
         requestId,
         trackingCode: cleanCode,
         errorCode: 'INTRANET_UNREACHABLE',
-        message: 'Tempo esgotado aguardando retorno da extensão SRO.',
+        message:
+          'Tempo esgotado aguardando retorno da extensão SRO. Se acabou de atualizar a extensão, dê F5 nesta página.',
       });
-    }, 15000);
+    }, 24000);
 
     window.postMessage(
       {

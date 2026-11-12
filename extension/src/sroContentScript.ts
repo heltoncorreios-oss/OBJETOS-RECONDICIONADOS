@@ -60,6 +60,15 @@ function normalizeCodeUpper(code: string): string {
 
 type TrackingInputElement = HTMLInputElement | HTMLTextAreaElement;
 
+function isElementVisible(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 function findTrackingInput(): TrackingInputElement | null {
   const selectors = [
     'input[name*="objeto" i]',
@@ -85,15 +94,18 @@ function findTrackingInput(): TrackingInputElement | null {
   ];
 
   for (const selector of selectors) {
-    const el = document.querySelector(selector);
-    if (
-      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
-      !el.disabled &&
-      !el.readOnly &&
-      el.type !== 'password' &&
-      el.type !== 'hidden'
-    ) {
-      return el;
+    const matches = Array.from(document.querySelectorAll(selector));
+    for (const el of matches) {
+      if (
+        (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+        !el.disabled &&
+        !el.readOnly &&
+        el.type !== 'password' &&
+        el.type !== 'hidden' &&
+        isElementVisible(el)
+      ) {
+        return el;
+      }
     }
   }
   return null;
@@ -101,25 +113,28 @@ function findTrackingInput(): TrackingInputElement | null {
 
 function findSearchButton(input: TrackingInputElement | null): HTMLElement | null {
   const form = input?.closest('form');
-  const scope: ParentNode = form || document;
+  const scope: ParentNode = form || input?.parentElement?.parentElement || document;
 
   const submitBtn = scope.querySelector(
     'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i], input[type="button"][value*="pesq" i], input[type="button"][value*="busc" i], input[type="button"][value*="cons" i]'
   );
-  if (submitBtn instanceof HTMLElement) {
+  if (submitBtn instanceof HTMLElement && isElementVisible(submitBtn)) {
     return submitBtn;
   }
 
   const candidates = Array.from(
-    scope.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
+    document.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
   );
   for (const el of candidates) {
-    if (!(el instanceof HTMLElement)) continue;
+    if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
     const rawText = [
       el.innerText,
       el.textContent,
       el.getAttribute('title'),
       el.getAttribute('aria-label'),
+      el.getAttribute('id'),
+      el.getAttribute('name'),
+      el.className,
       el instanceof HTMLInputElement ? el.value : '',
     ]
       .filter(Boolean)
@@ -127,9 +142,15 @@ function findSearchButton(input: TrackingInputElement | null): HTMLElement | nul
       .trim()
       .toLowerCase();
 
-    if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar)/.test(rawText)) {
+    if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar|search|lupa)/.test(rawText)) {
       return el;
     }
+  }
+
+  // Fallback: botão com ícone imediatamente próximo ao input
+  const nearBtn = scope.querySelector('button, a.btn');
+  if (nearBtn instanceof HTMLElement && isElementVisible(nearBtn)) {
+    return nearBtn;
   }
 
   return null;
@@ -171,9 +192,12 @@ function triggerInputAndSearch(trackingCode: string): {
     return { inputFound: true, searchTriggered: true };
   }
 
-  // Fallback com Enter caso o SPA ouça keydown/keyup sem tag <form>
+  // Fallback com Enter caso o SPA ouça keydown/keypress/keyup sem tag <form>
   input.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+  );
+  input.dispatchEvent(
+    new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
   );
   input.dispatchEvent(
     new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
@@ -197,12 +221,14 @@ function waitForInitialMount(trackingCode: string, timeoutMs: number): Promise<v
     let done = false;
     let observer: MutationObserver | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
 
     const finish = () => {
       if (done) return;
       done = true;
       observer?.disconnect();
       if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
       resolve();
     };
 
@@ -213,6 +239,9 @@ function waitForInitialMount(trackingCode: string, timeoutMs: number): Promise<v
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
     }
+    poll = setInterval(() => {
+      if (readyNow()) finish();
+    }, 200);
     timer = setTimeout(finish, timeoutMs);
   });
 }
@@ -235,7 +264,10 @@ function waitForRenderedSroDom(
     );
     if (loadingBusy) return false;
 
-    if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text))) {
+    if (
+      upperText.includes(cleanCode) &&
+      (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text))
+    ) {
       return true;
     }
     return false;
@@ -249,12 +281,14 @@ function waitForRenderedSroDom(
     let finished = false;
     let observer: MutationObserver | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
 
     const finish = (settled: boolean) => {
       if (finished) return;
       finished = true;
       observer?.disconnect();
       if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
       resolve({ settled });
     };
 
@@ -271,6 +305,12 @@ function waitForRenderedSroDom(
         characterData: true,
       });
     }
+
+    poll = setInterval(() => {
+      if (isDomReady()) {
+        finish(true);
+      }
+    }, 300);
 
     timer = setTimeout(() => finish(false), timeoutMs);
   });
@@ -292,7 +332,7 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
   const cleanCode = normalizeCodeUpper(msg.trackingCode);
 
   // Aguarda hidratação inicial caso a página seja SPA
-  await waitForInitialMount(cleanCode, 3000);
+  await waitForInitialMount(cleanCode, 2000);
 
   let text = document.body?.innerText || '';
 
@@ -313,7 +353,7 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
   const upperInitial = text.toUpperCase();
   const alreadyHasResults =
     upperInitial.includes(cleanCode) &&
-    (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text));
+    (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text));
 
   if (!alreadyHasResults && !isObjectNotFoundText(text)) {
     const triggerRes = triggerInputAndSearch(cleanCode);
@@ -321,7 +361,9 @@ async function handleExtractDom(msg: ExtractDomRequest): Promise<ExtractDomRespo
     searchTriggered = triggerRes.searchTriggered;
   }
 
-  await waitForRenderedSroDom(cleanCode, 7500);
+  if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+    await waitForRenderedSroDom(cleanCode, searchTriggered ? 7000 : 800);
+  }
 
   text = document.body?.innerText || '';
   const html = document.body?.innerHTML || '';

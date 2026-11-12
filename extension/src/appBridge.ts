@@ -62,14 +62,18 @@ if (isTrustedPageContext()) {
         typeof msg.requestId === 'string' && REQUEST_ID_REGEX.test(msg.requestId)
           ? msg.requestId
           : '';
-      chrome.runtime.sendMessage({ type: 'SRO_EXT_PING' }, (res) => {
-        if (chrome.runtime.lastError || !res?.ok) return;
-        postBackToApp({
-          type: 'SRO_EXT_PONG',
-          requestId,
-          extensionVersion: res.extensionVersion || EXTENSION_VERSION,
+      try {
+        chrome.runtime.sendMessage({ type: 'SRO_EXT_PING' }, (res) => {
+          if (chrome.runtime.lastError || !res?.ok) return;
+          postBackToApp({
+            type: 'SRO_EXT_PONG',
+            requestId,
+            extensionVersion: res.extensionVersion || EXTENSION_VERSION,
+          });
         });
-      });
+      } catch {
+        // Ignorar caso o contexto da extensão tenha sido recarregado
+      }
       return;
     }
 
@@ -78,10 +82,14 @@ if (isTrustedPageContext()) {
         typeof msg.requestId === 'string' && REQUEST_ID_REGEX.test(msg.requestId)
           ? msg.requestId
           : '';
-      chrome.runtime.sendMessage({
-        type: 'SRO_CANCEL_QUERY',
-        requestId,
-      });
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SRO_CANCEL_QUERY',
+          requestId,
+        });
+      } catch {
+        // Ignorar falha de cancelamento se o contexto foi recarregado
+      }
       return;
     }
 
@@ -102,41 +110,57 @@ if (isTrustedPageContext()) {
         return;
       }
 
-      chrome.runtime.sendMessage(
-        {
-          type: 'SRO_QUERY_REQUEST',
-          requestId,
-          trackingCode,
-        },
-        (res) => {
-          if (chrome.runtime.lastError) {
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'SRO_QUERY_REQUEST',
+            requestId,
+            trackingCode,
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              postBackToApp({
+                type: 'SRO_QUERY_RESPONSE',
+                ok: false,
+                requestId,
+                trackingCode,
+                extensionVersion: EXTENSION_VERSION,
+                errorCode: 'INTRANET_UNREACHABLE',
+                message:
+                  chrome.runtime.lastError.message ||
+                  'Falha de comunicação interna com o Service Worker da extensão.',
+              });
+              return;
+            }
+
             postBackToApp({
               type: 'SRO_QUERY_RESPONSE',
-              ok: false,
-              requestId,
-              trackingCode,
-              extensionVersion: EXTENSION_VERSION,
-              errorCode: 'INTRANET_UNREACHABLE',
-              message:
-                chrome.runtime.lastError.message ||
-                'Falha de comunicação interna com o Service Worker da extensão.',
+              ...(res || {
+                ok: false,
+                requestId,
+                trackingCode,
+                extensionVersion: EXTENSION_VERSION,
+                errorCode: 'INTRANET_UNREACHABLE',
+                message: 'Resposta vazia recebida da extensão SRO.',
+              }),
             });
-            return;
           }
-
-          postBackToApp({
-            type: 'SRO_QUERY_RESPONSE',
-            ...(res || {
-              ok: false,
-              requestId,
-              trackingCode,
-              extensionVersion: EXTENSION_VERSION,
-              errorCode: 'INTRANET_UNREACHABLE',
-              message: 'Resposta vazia recebida da extensão SRO.',
-            }),
-          });
-        }
-      );
+        );
+      } catch (err: any) {
+        const msgErr = String(err?.message || '');
+        const contextInvalidated = /Extension context invalidated/i.test(msgErr);
+        postBackToApp({
+          type: 'SRO_QUERY_RESPONSE',
+          ok: false,
+          requestId,
+          trackingCode,
+          extensionVersion: EXTENSION_VERSION,
+          errorCode: 'INTRANET_UNREACHABLE',
+          message: contextInvalidated
+            ? 'A extensão SRO foi atualizada no navegador. Atualize (F5) esta página do sistema e tente novamente.'
+            : msgErr || 'Não foi possível acionar o serviço da extensão SRO.',
+        });
+      }
     }
   });
 }

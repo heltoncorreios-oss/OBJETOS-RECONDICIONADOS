@@ -15,8 +15,8 @@ export const SRO_INTRANET_ORIGIN = 'https://srointranet.correios.com.br';
 export const SRO_INTRANET_BASE_URL = `${SRO_INTRANET_ORIGIN}/rastreamento`;
 
 export const EXTENSION_VERSION = '1.0.0';
-export const EXTENSION_QUERY_TIMEOUT_MS = 14000;
-export const EXTENSION_TAB_LOAD_TIMEOUT_MS = 10000;
+export const EXTENSION_QUERY_TIMEOUT_MS = 20000;
+export const EXTENSION_TAB_LOAD_TIMEOUT_MS = 12000;
 
 export const APP_CHANNEL_SOURCE = 'CORREIOS_RECONDICIONADOS_APP';
 export const EXT_CHANNEL_SOURCE = 'CORREIOS_SRO_EXTENSION_V1';

@@ -291,12 +291,20 @@ async function testBackgroundOriginAndSingleTabReuse() {
   assert.equal(updatedTabs[0].id, 42);
   assert.equal(createdTabs.length, 0, 'Deve reutilizar a aba existente do SRO sem criar nova aba');
 
+  let sendMessageOverride: (() => Promise<any>) | null = null;
+  (globalThis as any).chrome.tabs.sendMessage = async () => {
+    if (sendMessageOverride) return sendMessageOverride();
+    return mockDomRes;
+  };
+
   // Tela inicial do SRO ainda sem resultado para o objeto consultado não deve acusar OBJECT_NOT_FOUND de placeholder
   mockDomRes = {
     ok: true,
     authRequired: false,
     hasTrackingMatch: false,
     notFound: false,
+    inputFound: false,
+    searchTriggered: false,
     html: '<textarea placeholder="SS123456789BR"></textarea><div>Informe o código do objeto</div>',
     text: 'Informe o código do objeto SS123456789BR',
   };
@@ -313,6 +321,51 @@ async function testBackgroundOriginAndSingleTabReuse() {
   });
   assert.equal(unloadedScreenResponse.ok, false);
   assert.equal(unloadedScreenResponse.errorCode, 'INTRANET_UNREACHABLE');
+  assert.ok(unloadedScreenResponse.message.includes('campo de pesquisa'));
+
+  // Recuperação quando o clique de pesquisa do SRO recarrega a página (message channel closed)
+  let navAttempts = 0;
+  sendMessageOverride = async () => {
+    navAttempts += 1;
+    if (navAttempts === 1) {
+      throw new Error('The message channel closed before a response was received.');
+    }
+    return {
+      ok: true,
+      authRequired: false,
+      hasTrackingMatch: true,
+      notFound: false,
+      text: `
+        Objeto: OY932426593BR
+        Postagem (PO)
+        Peso: 0,850 kg
+        VD: N
+        Unidade: AC SAO MANUEL
+        Remetente: REM C
+        CEP Remetente: 04041-000
+        Número Logradouro: 50
+        Destinatário: DEST D
+        CEP Destinatário: 18650-065
+        Número Logradouro: 80
+      `,
+    };
+  };
+
+  const recoveredResponse: any = await new Promise((resolve) => {
+    handler(
+      { type: 'SRO_QUERY_REQUEST', requestId: 'req_nav_recover1', trackingCode: 'OY932426593BR' },
+      {
+        origin: 'https://recondicionamentodeobjetos.vercel.app',
+        frameId: 0,
+        tab: { url: 'https://recondicionamentodeobjetos.vercel.app/' },
+      },
+      resolve
+    );
+  });
+  assert.equal(recoveredResponse.ok, true);
+  assert.equal(recoveredResponse.data.codigoRastreamento, 'OY932426593BR');
+  assert.equal(recoveredResponse.data.pesoGramas, 850);
+  assert.equal(navAttempts, 2);
 
   delete (globalThis as any).chrome;
 }

@@ -26,6 +26,14 @@
   function normalizeCodeUpper(code) {
     return (code || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
+  function isElementVisible(el) {
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+      return false;
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
   function findTrackingInput() {
     const selectors = [
       'input[name*="objeto" i]',
@@ -50,37 +58,46 @@
       'input[type="text"]'
     ];
     for (const selector of selectors) {
-      const el = document.querySelector(selector);
-      if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.disabled && !el.readOnly && el.type !== "password" && el.type !== "hidden") {
-        return el;
+      const matches = Array.from(document.querySelectorAll(selector));
+      for (const el of matches) {
+        if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.disabled && !el.readOnly && el.type !== "password" && el.type !== "hidden" && isElementVisible(el)) {
+          return el;
+        }
       }
     }
     return null;
   }
   function findSearchButton(input) {
     const form = input?.closest("form");
-    const scope = form || document;
+    const scope = form || input?.parentElement?.parentElement || document;
     const submitBtn = scope.querySelector(
       'button[type="submit"], input[type="submit"], button[id*="pesq" i], button[id*="busc" i], button[id*="cons" i], input[type="button"][value*="pesq" i], input[type="button"][value*="busc" i], input[type="button"][value*="cons" i]'
     );
-    if (submitBtn instanceof HTMLElement) {
+    if (submitBtn instanceof HTMLElement && isElementVisible(submitBtn)) {
       return submitBtn;
     }
     const candidates = Array.from(
-      scope.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
+      document.querySelectorAll('button, input[type="button"], a[role="button"], a.btn')
     );
     for (const el of candidates) {
-      if (!(el instanceof HTMLElement)) continue;
+      if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
       const rawText = [
         el.innerText,
         el.textContent,
         el.getAttribute("title"),
         el.getAttribute("aria-label"),
+        el.getAttribute("id"),
+        el.getAttribute("name"),
+        el.className,
         el instanceof HTMLInputElement ? el.value : ""
       ].filter(Boolean).join(" ").trim().toLowerCase();
-      if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar)/.test(rawText)) {
+      if (/(pesquisar|consultar|buscar|rastrear|enviar|localizar|search|lupa)/.test(rawText)) {
         return el;
       }
+    }
+    const nearBtn = scope.querySelector("button, a.btn");
+    if (nearBtn instanceof HTMLElement && isElementVisible(nearBtn)) {
+      return nearBtn;
     }
     return null;
   }
@@ -113,6 +130,9 @@
       new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
     );
     input.dispatchEvent(
+      new KeyboardEvent("keypress", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
+    );
+    input.dispatchEvent(
       new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
     );
     return { inputFound: true, searchTriggered: true };
@@ -131,11 +151,13 @@
       let done = false;
       let observer = null;
       let timer = null;
+      let poll = null;
       const finish = () => {
         if (done) return;
         done = true;
         observer?.disconnect();
         if (timer) clearTimeout(timer);
+        if (poll) clearInterval(poll);
         resolve();
       };
       observer = new MutationObserver(() => {
@@ -144,6 +166,9 @@
       if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });
       }
+      poll = setInterval(() => {
+        if (readyNow()) finish();
+      }, 200);
       timer = setTimeout(finish, timeoutMs);
     });
   }
@@ -159,7 +184,7 @@
         document.querySelector('[aria-busy="true"], .loading, .spinner, mat-spinner')
       );
       if (loadingBusy) return false;
-      if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text))) {
+      if (upperText.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text))) {
         return true;
       }
       return false;
@@ -171,11 +196,13 @@
       let finished = false;
       let observer = null;
       let timer = null;
+      let poll = null;
       const finish = (settled) => {
         if (finished) return;
         finished = true;
         observer?.disconnect();
         if (timer) clearTimeout(timer);
+        if (poll) clearInterval(poll);
         resolve({ settled });
       };
       observer = new MutationObserver(() => {
@@ -190,6 +217,11 @@
           characterData: true
         });
       }
+      poll = setInterval(() => {
+        if (isDomReady()) {
+          finish(true);
+        }
+      }, 300);
       timer = setTimeout(() => finish(false), timeoutMs);
     });
   }
@@ -206,7 +238,7 @@
       };
     }
     const cleanCode = normalizeCodeUpper(msg.trackingCode);
-    await waitForInitialMount(cleanCode, 3e3);
+    await waitForInitialMount(cleanCode, 2e3);
     let text = document.body?.innerText || "";
     if (isLoginOrAuthScreen(text)) {
       return {
@@ -222,13 +254,15 @@
     let inputFound = false;
     let searchTriggered = false;
     const upperInitial = text.toUpperCase();
-    const alreadyHasResults = upperInitial.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso/i.test(text));
+    const alreadyHasResults = upperInitial.includes(cleanCode) && (hasPostagemHint(text) || /remetente|destinat[áa]rio|peso|evento|entregue|postado/i.test(text));
     if (!alreadyHasResults && !isObjectNotFoundText(text)) {
       const triggerRes = triggerInputAndSearch(cleanCode);
       inputFound = triggerRes.inputFound;
       searchTriggered = triggerRes.searchTriggered;
     }
-    await waitForRenderedSroDom(cleanCode, 7500);
+    if (!alreadyHasResults && !isObjectNotFoundText(text)) {
+      await waitForRenderedSroDom(cleanCode, searchTriggered ? 7e3 : 800);
+    }
     text = document.body?.innerText || "";
     const html = document.body?.innerHTML || "";
     const authRequired = isLoginOrAuthScreen(text);
