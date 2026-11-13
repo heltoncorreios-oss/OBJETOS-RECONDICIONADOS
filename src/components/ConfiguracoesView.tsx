@@ -90,7 +90,12 @@ export const ConfiguracoesView: React.FC<ConfiguracoesViewProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Backup_CDD_Sao_Manuel_${new Date().toISOString().split('T')[0]}.json`;
+    const unitSlug = (settings.nomeUnidade || 'Unidade')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    a.download = `Backup_${unitSlug || 'Unidade'}_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };

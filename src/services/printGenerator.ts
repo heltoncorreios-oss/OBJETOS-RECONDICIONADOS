@@ -590,7 +590,7 @@ function renderSingleTermoHtml(record: ObjetoRecord, settings: UnitSettings): st
           </div>
           <div class="check-item">
             <span class="checkbox-box">${anom.outrasOcorrencias ? 'X' : ''}</span>
-            <span>Outras (especificar): ${anom.outrasOcorrencias ? `<strong>${escapeHtml(anom.outrasOcorrenciasTexto || 'ENCAMINHADA PARA AC SÃO MANUEL')}</strong>` : ''}</span>
+            <span>Outras (especificar): ${anom.outrasOcorrencias ? `<strong>${escapeHtml(anom.outrasOcorrenciasTexto || (settings.cidade ? `ENCAMINHADA PARA AC ${settings.cidade.toUpperCase()}` : ''))}</strong>` : ''}</span>
           </div>
         </div>
 
@@ -631,7 +631,7 @@ function renderSingleTermoHtml(record: ObjetoRecord, settings: UnitSettings): st
           </div>
           <div class="check-item">
             <span class="checkbox-box">${prov.tipo === 'outras' ? 'X' : ''}</span>
-            <span>Outras (especificar): ${prov.tipo === 'outras' ? `<strong>${escapeHtml(prov.outrasDescricao || 'ENCAMINHADA PARA AC SÃO MANUEL')}</strong>` : ''}</span>
+            <span>Outras (especificar): ${prov.tipo === 'outras' ? `<strong>${escapeHtml(prov.outrasDescricao || (settings.cidade ? `ENCAMINHADA PARA AC ${settings.cidade.toUpperCase()}` : ''))}</strong>` : ''}</span>
           </div>
         </div>
       </div>

@@ -161,9 +161,14 @@ export const TermosListView: React.FC<TermosListViewProps> = ({
           <button
             onClick={() => {
               const doc = gerarLoteTermosPDF(validRecords, settings);
+              const unitSlug = (settings.nomeUnidade || 'Unidade')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-zA-Z0-9]+/g, '_')
+                .replace(/^_|_$/g, '');
               onOpenPdfModal(
                 doc,
-                `Todos_Termos_Constatacao_CDD_Sao_Manuel.pdf`,
+                `Todos_Termos_Constatacao_${unitSlug || 'Unidade'}.pdf`,
                 `Todos os Termos Cadastrados`,
                 `${validRecords.length} termos no arquivo`
               );

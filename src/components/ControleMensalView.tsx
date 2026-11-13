@@ -73,7 +73,12 @@ export const ControleMensalView: React.FC<ControleMensalViewProps> = ({
 
   const handleGerarPdfControle = (directDownload = false) => {
     const doc = gerarControleMensalPDF(selectedMonth, selectedYear, sortedRecords, settings);
-    const filename = `Controle_Objetos_Recondicionados_CDD_Sao_Manuel_${selectedYear}-${String(selectedMonth).padStart(2, '0')}.pdf`;
+    const unitSlug = (settings.nomeUnidade || 'Unidade')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    const filename = `Controle_Objetos_Recondicionados_${unitSlug || 'Unidade'}_${selectedYear}-${String(selectedMonth).padStart(2, '0')}.pdf`;
     
     logControleMensalEmissao(selectedYear, selectedMonth, settings.operadorMatriculaPadrao, filename);
 
@@ -148,7 +153,7 @@ export const ControleMensalView: React.FC<ControleMensalViewProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-black text-slate-900 tracking-tight">Controle Mensal de Objetos</h2>
-              <p className="text-xs text-slate-500">Folha oficial consolidada do CDD São Manuel para {mesExtenso} de {selectedYear}</p>
+              <p className="text-xs text-slate-500">Folha oficial consolidada de <strong className="text-slate-700">{settings.nomeUnidade || 'Unidade'}</strong> para {mesExtenso} de {selectedYear}</p>
             </div>
           </div>
 

@@ -467,7 +467,7 @@ export const PDFPreviewModal: React.FC<PDFPreviewModalProps> = ({
                           <span>Outras (especificar):</span>
                           {record.anomalias?.outrasOcorrencias && (
                             <span className="border border-black px-2 py-0.5 font-bold text-slate-950 text-[11px]">
-                              {record.anomalias.outrasOcorrenciasTexto || 'ENCAMINHADA PARA AC SÃO MANUEL'}
+                              {record.anomalias.outrasOcorrenciasTexto || (settings.cidade ? `ENCAMINHADA PARA AC ${settings.cidade.toUpperCase()}` : '')}
                             </span>
                           )}
                         </div>
@@ -527,7 +527,7 @@ export const PDFPreviewModal: React.FC<PDFPreviewModalProps> = ({
                         <span>Outras (especificar):</span>
                         {record.providencias?.tipo === 'outras' && (
                           <span className="border border-black px-2 py-0.5 font-bold text-slate-950 text-[11px]">
-                            {record.providencias.outrasDescricao || 'ENCAMINHADA PARA AC SÃO MANUEL'}
+                            {record.providencias.outrasDescricao || (settings.cidade ? `ENCAMINHADA PARA AC ${settings.cidade.toUpperCase()}` : '')}
                           </span>
                         )}
                       </div>

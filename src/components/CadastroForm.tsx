@@ -129,7 +129,12 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
 
   // Providências
   const [providenciaTipo, setProvidenciaTipo] = useState<ProvidenciaTipo>('outras');
-  const [outrasProvidenciasDescricao, setOutrasProvidenciasDescricao] = useState<string>('ENCAMINHADA PARA AC SÃO MANUEL');
+  const defaultOutrasDesc = settings.cidade
+    ? `ENCAMINHADA PARA AC ${settings.cidade.toUpperCase()}`
+    : settings.nomeUnidade
+    ? `ENCAMINHADA PELA UNIDADE ${settings.nomeUnidade.toUpperCase()}`
+    : '';
+  const [outrasProvidenciasDescricao, setOutrasProvidenciasDescricao] = useState<string>(defaultOutrasDesc);
 
   // Validação
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
@@ -685,7 +690,7 @@ export const CadastroForm: React.FC<CadastroFormProps> = ({
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4 text-[#00416B]" />
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-              Dados Fixos da Unidade (Configurações do CDD São Manuel)
+              Dados Fixos da Unidade ({settings.nomeUnidade || 'Configurações da Unidade'})
             </span>
           </div>
           <span className="text-[11px] text-slate-500">Puxados automaticamente</span>

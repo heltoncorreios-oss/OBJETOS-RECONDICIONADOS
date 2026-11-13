@@ -169,7 +169,12 @@ export default function App() {
     );
     const doc = gerarControleMensalPDF(mes, ano, monthRecords, settings);
     const mesNome = MESES_POR_EXTENSO[mes - 1];
-    const filename = `Controle_Objetos_Recondicionados_CDD_Sao_Manuel_${ano}-${String(mes).padStart(2, '0')}.pdf`;
+    const unitSlug = (settings.nomeUnidade || 'Unidade')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    const filename = `Controle_Objetos_Recondicionados_${unitSlug || 'Unidade'}_${ano}-${String(mes).padStart(2, '0')}.pdf`;
 
     logControleMensalEmissao(ano, mes, settings.operadorMatriculaPadrao, filename);
     refreshData();
