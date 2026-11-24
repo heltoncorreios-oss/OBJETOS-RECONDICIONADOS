@@ -311,38 +311,52 @@ function triggerInputAndSearch(trackingCode: string): {
   return { inputFound: true, searchTriggered: true };
 }
 
+function isPostadoStatusText(rawText: string): boolean {
+  const normalized = (rawText || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  if (/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(normalized)) {
+    return false;
+  }
+  return /^(?:postad[oa]\b|objeto\s+postad[oa]\b|postagem\b(?:\s*\(\s*po\s*\))?|po\s*[-–:]\s*(?:objeto\s+)?postad[oa]\b)/i.test(
+    normalized
+  );
+}
+
 /**
- * Localiza a guia ou linha "Postado" na tabela de histórico do SRO e encontra o botão/ícone "Det".
+ * Localiza a guia ou linha de postagem (ex: "Postado", "Postado depois do horário", etc.)
+ * na tabela de histórico do SRO e encontra o botão/ícone "Det".
  */
 function findPostadoTrigger(): HTMLElement | null {
   const docs = getAccessibleDocuments();
 
   for (const doc of docs) {
-    // 1. Caso haja uma guia/aba explícita chamada "Postado" ou "Postagem (PO)"
+    // 1. Caso haja uma guia/aba explícita de postagem (ex: "Postado", "Postado depois do horário", "Postagem (PO)")
     const tabCandidates = Array.from(
       doc.querySelectorAll('[role="tab"], .nav-link, .tab, .ui-tabs-anchor, a, button')
     );
     for (const el of tabCandidates) {
       if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
       const label = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (/^(?:postad[oa]|postagem\s*\(\s*po\s*\)|guia\s+postad[oa])$/i.test(label)) {
+      if (isPostadoStatusText(label) || /^guia\s+postad[oa]\b/i.test(label)) {
         return el;
       }
     }
 
-    // 2. Na tabela clássica do SRO (Det | Data Hora | Local | Situação | Nº evt), localizar apenas a linha folha "Postado"
+    // 2. Na tabela clássica do SRO (Det | Data Hora | Local | Situação | Nº evt), localizar apenas a linha folha de postagem
     const rows = Array.from(doc.querySelectorAll('tr, [role="row"]'));
     for (const row of rows) {
       if (!(row instanceof HTMLElement) || !isElementVisible(row)) continue;
       if (row.querySelector('tr, [role="row"]') !== null) continue;
 
       const rowText = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
-      if (/aguardando\s+postagem/i.test(rowText)) continue;
+      if (/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(rowText)) {
+        continue;
+      }
 
       const cells = Array.from(row.querySelectorAll(':scope > td, :scope > th, [role="cell"]'));
       const isPostadoRow = cells.some((cell) => {
         const cellText = (cell.textContent || '').replace(/\s+/g, ' ').trim();
-        return /^(?:postad[oa]|postagem\s*\(\s*po\s*\)|objeto\s+postad[oa])$/i.test(cellText);
+        return isPostadoStatusText(cellText);
       });
 
       if (!isPostadoRow) continue;

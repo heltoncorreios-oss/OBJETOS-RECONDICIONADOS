@@ -297,6 +297,33 @@ function testParserRules() {
   assert.equal(parsedMultiline.data?.numeroRemetente, '134');
   assert.equal(parsedMultiline.data?.valorDeclarado, 'SIM');
   assert.equal(parsedMultiline.data?.pesoGramas, 2580);
+
+  // Regressão: variação de situação na postagem ("Postado depois do horário") no resumo e no detalhe PO
+  const postadoDepoisHorarioHtml = `
+    <div>Objeto: OY932426593BR</div>
+    <table>
+      <tr><th>Det</th><th>Data Hora</th><th>Local</th><th>Situação</th><th>Nº evt</th></tr>
+      <tr><td>Det</td><td>16/11/2026 16:42:46</td><td>AC PALMAS - PALMAS / PR</td><td>Postado depois do horário</td><td>1</td></tr>
+    </table>
+    <div>
+      <h3>Postado depois do horário</h3>
+      <div>Unidade: 01234567 / AC PALMAS</div>
+      <div>CEP Destinatário: 18650065 &nbsp; Destinatário: JOAO DA SILVA</div>
+      <div>Número Logradouro: 500</div>
+      <div>CEP Remetente: 85555000 &nbsp; Remetente: EMPRESA PR LTDA</div>
+      <div>Número Logradouro: 42</div>
+      <div>VD: N &nbsp; Peso: 1,150 kg</div>
+    </div>
+  `;
+  const parsedDepoisHorario = parseSroContent(postadoDepoisHorarioHtml, 'OY932426593BR');
+  assert.equal(parsedDepoisHorario.ok, true);
+  assert.equal(parsedDepoisHorario.data?.unidadePostagem, '01234567 / AC PALMAS');
+  assert.equal(parsedDepoisHorario.data?.cepDestinatario, '18650065');
+  assert.equal(parsedDepoisHorario.data?.numeroDestinatario, '500');
+  assert.equal(parsedDepoisHorario.data?.cepRemetente, '85555000');
+  assert.equal(parsedDepoisHorario.data?.numeroRemetente, '42');
+  assert.equal(parsedDepoisHorario.data?.valorDeclarado, 'NÃO');
+  assert.equal(parsedDepoisHorario.data?.pesoGramas, 1150);
 }
 
 function testBuscaCepIntranetParser() {

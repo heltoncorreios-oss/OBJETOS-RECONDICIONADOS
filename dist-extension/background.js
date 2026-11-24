@@ -126,12 +126,12 @@ function hasPoDetailSignals(text) {
 }
 function isolatePostagemSection(fullText) {
   const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
-  const poStartRegex = /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\s*(?:\(\s*PO\s*\))?\s*$)/i;
+  const poStartRegex = /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\b)/i;
   const explicitOtherEventRegex = /(?:^(?:BDE|BDI|BDR|BLQ|CAR|CD|CMT|CO|CUN|DO|EST|FC|IDC|LDI|OEC|PAR|PMT|RO|TR)\s*[-–:]|\b(?:Entregue|Saiu para entrega|Objeto encaminhado|Objeto recebido|Objeto em transfer[êe]ncia|Aguardando retirada|Objeto\/unitizador expedido|Objeto\/unitizador desembarcado|Objeto\/unitizador embarcado|Passagem interna|Etiqueta emitida|Aguardando postagem)\b)/i;
   const candidateIndices = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (poStartRegex.test(line) && !/aguardando\s+postagem/i.test(line)) {
+    if (poStartRegex.test(line) && !/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(line)) {
       candidateIndices.push(i);
     }
   }

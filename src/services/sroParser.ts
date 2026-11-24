@@ -207,9 +207,9 @@ function hasPoDetailSignals(text: string): boolean {
 function isolatePostagemSection(fullText: string): string | null {
   const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Padrões que identificam especificamente o evento Postagem (PO) ou detalhe da guia "Postado"
+  // Padrões que identificam especificamente o evento Postagem (PO) ou variações (ex: "Postado depois do horário")
   const poStartRegex =
-    /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\s*(?:\(\s*PO\s*\))?\s*$)/i;
+    /(?:\bpostagem\s*\(\s*PO\s*\)|evento\s*[:\-]?\s*PO\b|\bPO\s*[-–:]\s*(?:objeto\s+)?postad[oa]|\bobjeto\s+postad[oa]\b|\btipo\s*[:\-]?\s*PO\b|situa[çc][ãa]o\s*[:=|]\s*postad[oa]\b|detalhe(?:s)?\s+(?:do\s+)?evento\b.*\bpostad[oa]\b|^\s*postad[oa]\b)/i;
 
   // Padrões que indicam o início de OUTRO evento posterior/anterior no histórico do SRO
   const explicitOtherEventRegex =
@@ -218,7 +218,10 @@ function isolatePostagemSection(fullText: string): string | null {
   const candidateIndices: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (poStartRegex.test(line) && !/aguardando\s+postagem/i.test(line)) {
+    if (
+      poStartRegex.test(line) &&
+      !/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(line)
+    ) {
       candidateIndices.push(i);
     }
   }

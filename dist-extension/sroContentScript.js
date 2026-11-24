@@ -226,6 +226,16 @@
     );
     return { inputFound: true, searchTriggered: true };
   }
+  function isPostadoStatusText(rawText) {
+    const normalized = (rawText || "").replace(/\s+/g, " ").trim();
+    if (!normalized) return false;
+    if (/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(normalized)) {
+      return false;
+    }
+    return /^(?:postad[oa]\b|objeto\s+postad[oa]\b|postagem\b(?:\s*\(\s*po\s*\))?|po\s*[-–:]\s*(?:objeto\s+)?postad[oa]\b)/i.test(
+      normalized
+    );
+  }
   function findPostadoTrigger() {
     const docs = getAccessibleDocuments();
     for (const doc of docs) {
@@ -235,7 +245,7 @@
       for (const el of tabCandidates) {
         if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
         const label = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/^(?:postad[oa]|postagem\s*\(\s*po\s*\)|guia\s+postad[oa])$/i.test(label)) {
+        if (isPostadoStatusText(label) || /^guia\s+postad[oa]\b/i.test(label)) {
           return el;
         }
       }
@@ -244,11 +254,13 @@
         if (!(row instanceof HTMLElement) || !isElementVisible(row)) continue;
         if (row.querySelector('tr, [role="row"]') !== null) continue;
         const rowText = (row.innerText || row.textContent || "").replace(/\s+/g, " ").trim();
-        if (/aguardando\s+postagem/i.test(rowText)) continue;
+        if (/(?:aguardando\s+postagem|n[ãa]o\s+postad[oa]|postagem\s+cancelada)/i.test(rowText)) {
+          continue;
+        }
         const cells = Array.from(row.querySelectorAll(':scope > td, :scope > th, [role="cell"]'));
         const isPostadoRow = cells.some((cell) => {
           const cellText = (cell.textContent || "").replace(/\s+/g, " ").trim();
-          return /^(?:postad[oa]|postagem\s*\(\s*po\s*\)|objeto\s+postad[oa])$/i.test(cellText);
+          return isPostadoStatusText(cellText);
         });
         if (!isPostadoRow) continue;
         const firstCell = cells[0];
